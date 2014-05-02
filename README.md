@@ -8,6 +8,8 @@ The tool allows for describing the current state of the database schema, and
 inserting into that description the operations necessary to migrate from the
 previous version to the current state.
 
+This tool is heavily influenced by [Liquibase](http://www.liquibase.org).
+
 
 ## How It's Different
 

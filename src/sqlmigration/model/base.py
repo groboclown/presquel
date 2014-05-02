@@ -13,8 +13,10 @@ class BaseObject(object):
     """
     def __init__(self, order, comment, object_type):
         object.__init__(self)
-        assert type(order) == type(int)
-        assert type(comment) == type(str)
+        if not isinstance(order, int):
+            raise Exception("order must be int, but found " + repr(order))
+        if comment is not None and not isinstance(comment, str):
+            raise Exception("comment must be str, but found " + repr(comment))
         assert isinstance(object_type, SchemaObjectType)
         self.__order = order
         self.__comment = comment

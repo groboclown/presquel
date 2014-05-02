@@ -50,10 +50,21 @@ class Change(BaseObject):
 
 
 class SqlChange(Change):
-    def __init__(self, order, comment, object_type, sql):
+    def __init__(self, order, comment, object_type, sql, platforms):
         Change.__init__(self, order, comment, object_type, SQL_CHANGE)
         self.__sql = sql
+        self.__platforms = platforms
 
     @property
     def sql(self):
         return self.__sql
+
+    @property
+    def platforms(self):
+        """
+        Returns a list of the database platforms on which this sql change
+        can run.
+
+        :return: list(str)
+        """
+        return self.__platforms

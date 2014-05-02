@@ -12,10 +12,11 @@ class SchemaVersion(object):
     """
     def __init__(self, version, top_changes, schema):
         object.__init__(self)
-        assert type(version) == type(int)
+        if not isinstance(version, int):
+            raise Exception('"version" must be int, found ' + repr(version))
         self.__version = version
-        self.__top_changes = top_changes
-        self.__schema = schema
+        self.__top_changes = sorted(top_changes)
+        self.__schema = sorted(schema)
 
     @property
     def version(self):

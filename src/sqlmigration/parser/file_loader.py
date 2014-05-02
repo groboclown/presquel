@@ -39,8 +39,10 @@ def find_version_dirs(root_dir):
     :return:
     """
 
+    print("DEBUG: find_version_dirs("+repr(root_dir)+")")
     for name in os.listdir(root_dir):
-        full_name = os.path.join(dir, name)
+        print("DEBUG: --"+repr(name))
+        full_name = os.path.join(root_dir, name)
         if os.path.isdir(full_name):
             if name.count("_") > 0:
                 name = name[0: name.find("_")]
@@ -69,9 +71,10 @@ def parse_versions(root_dir):
             if ext:
                 ext = ext.lower()
                 if ext in PARSERS_BY_EXTENSION:
+                    print("DEBUG: " + file_name)
                     with open(file_name, 'r') as f:
                         _split_changes_schemas(
-                            PARSERS_BY_EXTENSION[ext].parse(f),
+                            PARSERS_BY_EXTENSION[ext].parse(file_name, f),
                             changes,
                             schemas)
         ret.append(SchemaVersion(version_number, changes, schemas))

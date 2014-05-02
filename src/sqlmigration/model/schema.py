@@ -3,18 +3,23 @@ Describes the current schema for the database version.
 """
 
 from .base import (BaseObject, TABLE_TYPE, COLUMN_TYPE, VIEW_TYPE,
-                   CONSTRAINT_TYPE)
+                   CONSTRAINT_TYPE, SEQUENCE_TYPE, PROCEDURE_TYPE)
 
 
 class SchemaObject(BaseObject):
-    def __init__(self, order, comment, object_type, changes):
+    def __init__(self, name, order, comment, object_type, changes):
         BaseObject.__init__(self, order, comment, object_type)
         self.__object_type = object_type
         self.__changes = changes or []
+        self.__name = name
 
         # One time setting of the parent
         for ch in self.__changes:
             ch.parent = self
+
+    @property
+    def name(self):
+        return self.__name
 
     @property
     def changes(self):
@@ -72,14 +77,57 @@ class ValueTypeValue(object):
         return self.__computed_value
 
 
-class Constraint(SchemaObject):
-    def __init__(self, order, comment, constraint_type, changes):
-        SchemaObject.__init__(self, order, comment, CONSTRAINT_TYPE, changes)
-        self.__constraint_type = constraint_type
+class ColumnConstraint(SchemaObject):
+    def __init__(self, order, comment, constraint_type, details, changes):
+        SchemaObject.__init__(self, constraint_type, order, comment,
+                              CONSTRAINT_TYPE, changes)
+        assert isinstance(constraint_type, str)
+        self.__constraint_type = _strip_keys(constraint_type)
+        details = details or {}
+        assert isinstance(details, dict)
+        self.__details = {}
+        for (k, v) in details.items():
+            self.__details[_strip_keys(k)] = v
 
     @property
     def constraint_type(self):
         return self.__constraint_type
+
+    @property
+    def details(self):
+        """
+        A bit bucket of additional information about the constraint.
+        Eventually, this may be better defined.
+
+        :return: dict
+        """
+        return self.__details
+
+
+class TableConstraint(SchemaObject):
+    def __init__(self, order, comment, constraint_type, details, changes):
+        SchemaObject.__init__(self, constraint_type,
+                              order, comment, CONSTRAINT_TYPE, changes)
+        self.__constraint_type = _strip_keys(constraint_type)
+        details = details or {}
+        assert isinstance(details, dict)
+        self.__details = {}
+        for (k, v) in details.items():
+            self.__details[_strip_keys(k)] = v
+
+    @property
+    def constraint_type(self):
+        return self.__constraint_type
+
+    @property
+    def details(self):
+        """
+        A bit bucket of additional information about the constraint.
+        Eventually, this may be better defined.
+
+        :return: dict
+        """
+        return self.__details
 
 
 class Column(SchemaObject):
@@ -91,7 +139,7 @@ class Column(SchemaObject):
         assert default_value is None or isinstance(default_value,
                                                    ValueTypeValue)
 
-        SchemaObject.__init__(self, order, comment, COLUMN_TYPE, changes)
+        SchemaObject.__init__(self, name, order, comment, COLUMN_TYPE, changes)
         self.__name = name
         self.__value_type = value_type
         self.__value = value
@@ -149,14 +197,20 @@ class Column(SchemaObject):
 
 
 class Table(SchemaObject):
+
+    # TODO support clustered indicies and other custom constraints on the
+    # table as a whole.
+
     def __init__(self, order, comment, catalog_name, schema_name, table_name,
-                 table_space, columns, changes):
-        SchemaObject.__init__(self, order, comment, TABLE_TYPE, changes)
+                 table_space, columns, table_constraints, changes):
+        SchemaObject.__init__(self, table_name, order, comment, TABLE_TYPE,
+                              changes)
         self.__catalog_name = catalog_name
         self.__schema_name = schema_name
         self.__table_name = table_name
         self.__table_space = table_space
         self.__columns = columns
+        self.__table_constraints = table_constraints
 
     @property
     def catalog_name(self):
@@ -179,6 +233,10 @@ class Table(SchemaObject):
         return self.__columns
 
     @property
+    def table_constraints(self):
+        return self.__table_constraints
+
+    @property
     def sub_schema(self):
         return self.columns
 
@@ -186,7 +244,8 @@ class Table(SchemaObject):
 class View(SchemaObject):
     def __init__(self, order, comment, catalog_name, replace_if_exists,
                  schema_name, view_name, select_query, columns, changes):
-        SchemaObject.__init__(self, order, comment, VIEW_TYPE, changes)
+        SchemaObject.__init__(self, view_name, order, comment, VIEW_TYPE,
+                              changes)
         self.__catalog_name = catalog_name
         self.__replace_if_exists = replace_if_exists
         self.__schema_name = schema_name
@@ -223,9 +282,21 @@ class View(SchemaObject):
         return self.columns
 
 
+class Sequence(SchemaObject):
+    # FIXME implement this
+    def __init__(self, order, comment, changes):
+        SchemaObject.__init__(self, '', order, comment, SEQUENCE_TYPE, changes)
+        raise Exception("not implemented")
 
 
+class Procedure(SchemaObject):
+    # FIXME implement this
+    def __init__(self, order, comment, changes):
+        SchemaObject.__init__(self, '', order, comment, PROCEDURE_TYPE, changes)
+        raise Exception("not implemented")
 
-# TODO
-# class Sequence
-# class Procedure
+
+def _strip_keys(key):
+    for c in ' \r\n\t_-':
+        key = key.replace(c, '')
+    return key.lower()
