@@ -9,3 +9,5 @@ assert cur_version >= req_version, "You must run this with Python 3"
 
 from .parser import parse_versions
 from .gen import get_generator
+
+from . import model

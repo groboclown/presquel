@@ -2,10 +2,10 @@
 Base classes used for the generation of code based on the model objects.
 """
 
-from ..model import (View, Table, Change, Sequence, Procedure, SqlChange,
-                     ValueTypeValue)
+from ..model import (ValueTypeValue)
 from .base import (SchemaScriptGenerator)
 import time
+
 
 class MySqlScriptGenerator(SchemaScriptGenerator):
     """
@@ -203,10 +203,8 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
                         constraint_sql += ' ON UPDATE ' + ct.details[
                             'update'].upper()
 
-                elif ct.constraint_type not in ('notnull', 'null'):
-                    raise Exception('unknown constraint type ' +
-                                    ct.constraint_type + ' on column ' +
-                                    col.name + ' on table ' + table.table_name)
+                # We allow other constraint types, because those could be used
+                # by other databases or tools.
 
         # FIXME add clustered index table constraint checking
 
