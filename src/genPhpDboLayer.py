@@ -27,11 +27,18 @@ def generate_file(schema_name, columns, table_constraints, read_only):
                                       'Table' + str(constraint.order),
                                       constraint.details['script']])
 
+    uses = ''
+    if parent_class.count('\\') > 0:
+        uses = 'use ' + parent_class[0: parent_class.find('\\')] + ';'
+
     with open(file_name, 'w') as f:
         f.writelines(line + '\n' for line in [
             '<?php',
             '',
             'namespace ' + namespace + ';',
+            '',
+            uses,
+            '', '',
             '/**',
             ' * DBO object for ' + schema_name,
             ' *',
@@ -66,25 +73,32 @@ def generate_read(schema_name, columns, processed_columns):
         sql += ' INNER JOIN ' + fk[3] + ' ON ' + fk[3] + '.' + fk[4] + ' = ' +\
             schema_name + '.' + fk[0]
 
+    # TODO make the readAll take an optional "rowStart, rowEnd" argument
     ret = [
+        '',
+        '    public function countRows($db) {',
+        '        $stmt = $db->prepare(\'SELECT COUNT(*) FROM ' + schema_name + '\');',
+        '        $stmt->execute();',
+        '        return $stmt->fetchColumn();',
+        '    }', '', '',
         '    public function readAll($db) {',
-        '        $stmt = $db->(\'' + sql.replace("'", "''") + '\');',
+        '        $stmt = $db->prepare(\'' + sql.replace("'", "''") + '\');',
         '        $stmt->setFetchMode(PDO::FETCH_ASSOC);',
         '        $stmt->execute();',
         '        $rows = array();',
-        '        for ($stmt->fetch() as $row) {',
+        '        foreach ($stmt->fetch() as $row) {',
         '            if (!validateRead($row)) {',
         '                return false;',
         '            }',
         '            $rows[] = $row;',
         '        }',
         '        return $rows;',
-        '    }',
+        '    }', '', '',
         '    public function read($id) {',
         '        if ($id == null || !is_int($id)) {',
         '            return false;',
         '        }',
-        '        $stmt = $db->(\'' + sql.replace("'", "''") + ' WHERE ' +
+        '        $stmt = $db->prepare(\'' + sql.replace("'", "''") + ' WHERE ' +
         processed_columns['primary_key_column'].name + ' = ?\');',
         '        $stmt->setFetchMode(PDO::FETCH_ASSOC);',
         '        $stmt->execute($id);',
@@ -96,7 +110,7 @@ def generate_read(schema_name, columns, processed_columns):
         '            return false;',
         '        }',
         '        return $row;',
-        '    }'
+        '    }', ''
     ]
 
     return ret
@@ -112,15 +126,19 @@ def generate_create(schema_name, columns, processed_columns):
           (','.join((':' + cn) for cn in column_names)) + ')'
 
     ret = [
+        '',
         '    public function create($db, $data) {',
-        '        validateWrite($data);',
-        '        $stmt = $db->(\'' + sql.replace("'", "''") + '\');',
+        '        if (! validateWrite($data)) {',
+        '            return false;',
+        '        }',
+        '        $stmt = $db->prepare(\'' + sql.replace("'", "''") + '\');',
         '        $stmt->execute($data);',
         '        $id = $db->lastInsertId();',
         '        $data["' + processed_columns['primary_key_column'].name +
         '"] = $id;',
         '        return $data;',
-        '    }'
+        '    }',
+        ''
     ]
 
     return ret
@@ -132,17 +150,18 @@ def generate_update(schema_name, columns, processed_columns):
         if column != processed_columns['primary_key_column']:
             column_names.append(column.name)
     sql = 'UPDATE ' + schema_name +\
-          (','.join((' SET '+cn+ ' = :' + cn) for cn in column_names)) +\
+          (','.join((' SET ' + cn + ' = :' + cn) for cn in column_names)) +\
           ' WHERE ' + processed_columns['primary_key_column'].name + ' = :' + \
           processed_columns['primary_key_column'].name
 
     ret = [
+        '',
         '    public function update($db, $data) {',
         '        validateWrite($data);',
-        '        $stmt = $db->(\'' + sql.replace("'", "''") + '\');',
+        '        $stmt = $db->prepare(\'' + sql.replace("'", "''") + '\');',
         '        $stmt->execute($data);',
         '        return $data;',
-        '    }'
+        '    }', ''
     ]
 
     return ret
@@ -154,11 +173,13 @@ def generate_delete(schema_name, columns, processed_columns):
         processed_columns['primary_key_column'].name
 
     ret = [
+        '',
         '    public function remove($db, $data) {',
-        '        $stmt = $db->(\'' + sql.replace("'", "''") + '\');',
+        '        $stmt = $db->prepare(\'' + sql.replace("'", "''") + '\');',
         '        $stmt->execute($data);',
         '        return false;',
         '    }'
+        '',
     ]
 
     return ret
@@ -166,41 +187,49 @@ def generate_delete(schema_name, columns, processed_columns):
 
 def generate_validations(table_validations, processed_columns):
     table_validates = [
+        '',
         '    private function validateTable($row) {',
         '        $ret = true;',
     ]
     read_validates = [
+        '',
         '    private function validateRead($row) {',
         '        $ret = $true;',
     ]
     write_validates = [
+        '',
         '    private function validateWrite($row) {',
         '        $ret = validateTable($row);',
     ]
 
     ret = []
 
+    # Always run the validation, by having it appear before the '&& $ret',
+    # so that the parent class can collect all of the validation errors.
     for v in processed_columns['php_read']:
-        read_validates.append('        $ret = $ret && validate' + v[2] +
-                              '($row);')
+        read_validates.append('        $ret = validate' + v[2] +
+                              '($row) && $ret;')
         ret.extend(generate_validation(v))
     for v in processed_columns['php_write']:
-        write_validates.append('        $ret = $ret && validate' + v[2] +
-                               '($row);')
+        write_validates.append('        $ret = validate' + v[2] +
+                               '($row) && $ret;')
         ret.extend(generate_validation(v))
     for v in processed_columns['php_validation']:
-        write_validates.append('        $ret = $ret && validate' + v[2] +
-                               '($row);')
+        write_validates.append('        $ret = validate' + v[2] +
+                               '($row) && $ret;')
         ret.extend(generate_validation(v))
 
     for validation in table_validations:
-        table_validates.append('        $ret = $ret && validate' +
-                               validation[2] + '($row);')
+        table_validates.append('        $ret = validate' +
+                               validation[2] + '($row) && $ret;')
         ret.extend(generate_validation(validation))
 
-    table_validates.extend(['        return $ret;', '    }'])
-    read_validates.extend(['        return $ret;', '    }'])
-    write_validates.extend(['        return $ret;', '    }'])
+    table_validates.extend(['        return $this->finalCheck($ret);', '    }',
+                            ''])
+    read_validates.extend(['        return $this->finalCheck($ret);', '    }',
+                           ''])
+    write_validates.extend(['        return $this->finalCheck($ret);', '    }',
+                            ''])
     ret.extend(read_validates)
     ret.extend(write_validates)
     ret.extend(table_validates)
@@ -211,6 +240,7 @@ def generate_validation(validation):
     (schema_name, php_name, validation_name, script) = validation
 
     ret = [
+        '',
         '    private function validate' + validation_name + '($row) {',
     ]
 
@@ -219,7 +249,7 @@ def generate_validation(validation):
     ret.extend([
         '        return $this->ensure(' + ('            '.join(
         line for line in script.splitlines())) + ', "' + schema_name + '");',
-        '    }'
+        '    }', ''
     ])
     return ret
 
@@ -308,4 +338,3 @@ if __name__ == '__main__':
         elif isinstance(schema, sqlmigration.model.View):
             print("View " + schema.name)
             generate_file(schema.view_name, schema.columns, [], True)
-
