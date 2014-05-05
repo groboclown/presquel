@@ -214,7 +214,9 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
 
         # FIXME add partition options
 
-        sql += ';\n'
+        # FIXME make this selectable.  For now, we'll hard-code it for the
+        # foreign key support.
+        sql += ' ENGINE=INNODB;\n'
 
         return [self._header(table), sql]
 

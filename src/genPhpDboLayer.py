@@ -37,6 +37,7 @@ def generate_file(schema_name, columns, table_constraints, read_only):
             '',
             'namespace ' + namespace + ';',
             '',
+            'use PDO;',
             uses,
             '', '',
             '/**',
@@ -67,36 +68,48 @@ def generate_file(schema_name, columns, table_constraints, read_only):
 
 
 def generate_read(schema_name, columns, processed_columns):
-    fks = processed_columns['foreign_keys']
     sql = 'SELECT * FROM ' + schema_name
-    for fk in fks:
-        sql += ' INNER JOIN ' + fk[3] + ' ON ' + fk[3] + '.' + fk[4] + ' = ' +\
-            schema_name + '.' + fk[0]
+    for fk in processed_columns['foreign_keys']:
+        if not fk[5]:
+            sql += ' INNER JOIN ' + fk[3] + ' ON ' + fk[3] + '.' + fk[4] +\
+                   ' = ' + schema_name + '.' + fk[0]
 
     # TODO make the readAll take an optional "rowStart, rowEnd" argument
     ret = [
         '',
         '    public function countRows($db) {',
-        '        $stmt = $db->prepare(\'SELECT COUNT(*) FROM ' + schema_name + '\');',
+        '        $stmt = $db->prepare(\'SELECT COUNT(*) FROM ' + schema_name +
+        '\');',
         '        $stmt->execute();',
         '        return $stmt->fetchColumn();',
         '    }', '', '',
-        '    public function readAll($db) {',
-        '        $stmt = $db->prepare(\'' + sql.replace("'", "''") + '\');',
+        '    public function readAll($db, $order = false, $start = -1, '
+        '$end = -1) {',
+        '        $sql = \'' + sql.replace("'", "''") + ' ORDER BY \';',
+        '        if (! $order) {',
+        '            $sql .= \'' +
+        processed_columns['primary_key_column'].name + '\';',
+        '        } else {',
+        '            $sql .= $oder;',
+        '        }',
+        '        if ($start >= 0 && $end > 0) {',
+        '            $sql .= \' LIMIT \'.$start.\',\'.$end;',
+        '        }',
+        '        $stmt = $db->prepare($sql);',
         '        $stmt->setFetchMode(PDO::FETCH_ASSOC);',
         '        $stmt->execute();',
         '        $rows = array();',
-        '        foreach ($stmt->fetch() as $row) {',
-        '            if (!validateRead($row)) {',
-        '                return false;',
+        '        foreach ($stmt->fetchAll() as $row) {',
+        '            if (!$this->validateRead($row)) {',
+        '                return False;',
         '            }',
         '            $rows[] = $row;',
         '        }',
         '        return $rows;',
         '    }', '', '',
         '    public function read($id) {',
-        '        if ($id == null || !is_int($id)) {',
-        '            return false;',
+        '        if ((! $id && $id != 0) || !is_int($id)) {',
+        '            return False;',
         '        }',
         '        $stmt = $db->prepare(\'' + sql.replace("'", "''") + ' WHERE ' +
         processed_columns['primary_key_column'].name + ' = ?\');',
@@ -104,35 +117,89 @@ def generate_read(schema_name, columns, processed_columns):
         '        $stmt->execute($id);',
         '        $row = $stmt->fetch();',
         '        if (!$row) {',
-        '            return false;',
+        '            return False;',
         '        }',
-        '        if (!validateRead($row)) {',
-        '            return false;',
+        '        if (!$this->validateRead($row)) {',
+        '            return False;',
         '        }',
         '        return $row;',
         '    }', ''
     ]
+    for fk in processed_columns['foreign_keys']:
+        if fk[5]:
+            ret.extend([
+                '',
+                '    public function readFor' + fk[1] +
+                '($db, $id, $order = false, $start = -1, $end = -1) {',
+                '        if ((! $id && $id != 0) || !is_int($id)) {',
+                '            return False;',
+                '        }',
+                '        $sql = \'' + sql.replace("'", "''") +
+                ' WHERE ' + fk[0] + ' = ? ORDER BY \';',
+                '        if (! $order) {',
+                '            $sql = \'' + processed_columns[
+                    'primary_key_column'].name + '\';',
+                '        } else {',
+                '            $sql = $order;',
+                '        }',
+                '        if ($start >= 0 && $end > 0) {',
+                '            $sql .= \' LIMIT \'.$start.\',\'.$end;',
+                '        }',
+                '        $stmt = $db->prepare($sql);',
+                '        $stmt->setFetchMode(PDO::FETCH_ASSOC);',
+                '        $stmt->execute(array($id));',
+                '        $rows = array();',
+                '        foreach ($stmt->fetchAll() as $row) {',
+                '            if (!$this->validateRead($row)) {',
+                '                return False;',
+                '            }',
+                '            $rows[] = $row;',
+                '        }',
+                '        return $rows;',
+                '    }',
+                '',
+            ])
 
     return ret
 
 
 def generate_create(schema_name, columns, processed_columns):
     column_names = []
+    date_cols = []
+    date_vals = []
     for column in columns:
         if column != processed_columns['primary_key_column']:
-            column_names.append(column.name)
-    sql = 'INSERT INTO ' + schema_name + ' (' +\
-          (','.join(cn for cn in column_names)) + ') VALUES (' +\
-          (','.join((':' + cn) for cn in column_names)) + ')'
+            # Special handlers for the creation date.  This is specific
+            # to the WebRiffs standards
+            if column.name.lower() == 'created_on':
+                date_cols.append(column.name)
+                # MySql flavor
+                date_vals.append("NOW()")
+            elif column.name.lower() == 'last_updated_on':
+                date_cols.append(column.name)
+                date_vals.append("NULL")
+            else:
+                column_names.append(column.name)
+    cns = []
+    cns.extend(column_names)
+    cns.extend(date_cols)
+    vals = []
+    vals.extend(':' + cn for cn in column_names)
+    vals.extend(date_vals)
+    sql = ('INSERT INTO ' + schema_name + ' (' +
+           (','.join(cns)) +
+           ') VALUES (' + (','.join(vals)) + ')')
 
     ret = [
         '',
         '    public function create($db, $data) {',
-        '        if (! validateWrite($data)) {',
-        '            return false;',
+        '        if (! $this->validateWrite($data)) {',
+        '            return False;',
         '        }',
         '        $stmt = $db->prepare(\'' + sql.replace("'", "''") + '\');',
-        '        $stmt->execute($data);',
+        '        if (! $stmt->execute($data)) {',
+        '            $this->insertFailed(\'' + schema_name + '\', $data);',
+        '        }',
         '        $id = $db->lastInsertId();',
         '        $data["' + processed_columns['primary_key_column'].name +
         '"] = $id;',
@@ -157,7 +224,9 @@ def generate_update(schema_name, columns, processed_columns):
     ret = [
         '',
         '    public function update($db, $data) {',
-        '        validateWrite($data);',
+        '        if (! $this->validateWrite($data)) {',
+        '            return False;',
+        '        }',
         '        $stmt = $db->prepare(\'' + sql.replace("'", "''") + '\');',
         '        $stmt->execute($data);',
         '        return $data;',
@@ -177,7 +246,7 @@ def generate_delete(schema_name, columns, processed_columns):
         '    public function remove($db, $data) {',
         '        $stmt = $db->prepare(\'' + sql.replace("'", "''") + '\');',
         '        $stmt->execute($data);',
-        '        return false;',
+        '        return False;',
         '    }'
         '',
     ]
@@ -188,18 +257,18 @@ def generate_delete(schema_name, columns, processed_columns):
 def generate_validations(table_validations, processed_columns):
     table_validates = [
         '',
-        '    private function validateTable($row) {',
-        '        $ret = true;',
+        '    private function validateTable(&$row) {',
+        '        $ret = True;',
     ]
     read_validates = [
         '',
-        '    private function validateRead($row) {',
-        '        $ret = $true;',
+        '    private function validateRead(&$row) {',
+        '        $ret = True;',
     ]
     write_validates = [
         '',
-        '    private function validateWrite($row) {',
-        '        $ret = validateTable($row);',
+        '    private function validateWrite(&$row) {',
+        '        $ret = $this->validateTable($row);',
     ]
 
     ret = []
@@ -207,20 +276,20 @@ def generate_validations(table_validations, processed_columns):
     # Always run the validation, by having it appear before the '&& $ret',
     # so that the parent class can collect all of the validation errors.
     for v in processed_columns['php_read']:
-        read_validates.append('        $ret = validate' + v[2] +
+        read_validates.append('        $ret = $this->validate' + v[2] +
                               '($row) && $ret;')
         ret.extend(generate_validation(v))
     for v in processed_columns['php_write']:
-        write_validates.append('        $ret = validate' + v[2] +
+        write_validates.append('        $ret = $this->validate' + v[2] +
                                '($row) && $ret;')
         ret.extend(generate_validation(v))
     for v in processed_columns['php_validation']:
-        write_validates.append('        $ret = validate' + v[2] +
+        write_validates.append('        $ret = $this->validate' + v[2] +
                                '($row) && $ret;')
         ret.extend(generate_validation(v))
 
     for validation in table_validations:
-        table_validates.append('        $ret = validate' +
+        table_validates.append('        $ret = $this->validate' +
                                validation[2] + '($row) && $ret;')
         ret.extend(generate_validation(validation))
 
@@ -241,7 +310,7 @@ def generate_validation(validation):
 
     ret = [
         '',
-        '    private function validate' + validation_name + '($row) {',
+        '    private function validate' + validation_name + '(&$row) {',
     ]
 
     if php_name is not None:
@@ -264,7 +333,7 @@ def process_columns(schema_name, columns):
         assert isinstance(column, sqlmigration.model.Column)
         cn = generate_php_name(column.name)
         for constraint in column.constraints:
-            cno = generate_php_name(column.name) + '_' + str(constraint.order)
+            cno = cn + '_' + str(constraint.order)
             assert isinstance(constraint, sqlmigration.model.ColumnConstraint)
             if constraint.constraint_type == 'primarykey':
                 if primary_key_column is not None:
@@ -275,10 +344,14 @@ def process_columns(schema_name, columns):
                 if 'columns' in constraint.details:
                     raise Exception(schema_name + ": we do not handle multiple "
                                                   "column foreign keys")
+                is_owner = False
+                if ('relationship' in constraint.details and
+                        constraint.details['relationship'].lower() == 'owner'):
+                    is_owner = True
                 foreign_keys.append([
                     column.name, cn, cno + '_fk',
                     constraint.details['table'],
-                    constraint.details['column']])
+                    constraint.details['column'], is_owner])
             elif constraint.constraint_type == 'phpvalidation':
                 php_validation.append([
                     column.name, cn, cno,
