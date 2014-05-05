@@ -67,8 +67,9 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
             for ct in col.constraints:
                 if ct.constraint_type == 'notnull':
                     sql += ' NOT NULL'
-                elif ct.constraint_type == 'nullable':
-                    print("null constraint")
+                elif (ct.constraint_type == 'nullable' or
+                        ct.constraint_type == 'null'):
+                    #print("null constraint")
                     sql += ' NULL'
 
             if col.default_value is not None:

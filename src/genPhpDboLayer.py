@@ -68,13 +68,20 @@ def generate_file(schema_name, columns, table_constraints, read_only):
 
 
 def generate_read(schema_name, columns, processed_columns):
+    # FIXME this needs to know the foreign tables, so that it can properly
+    # separate (via alias) the foreign column names.
     sql = 'SELECT * FROM ' + schema_name
+    fki = 0
     for fk in processed_columns['foreign_keys']:
+        fki += 1
         if not fk[5]:
-            sql += ' INNER JOIN ' + fk[3] + ' ON ' + fk[3] + '.' + fk[4] +\
-                   ' = ' + schema_name + '.' + fk[0]
+            if fk[6]:
+                sql += ' INNER JOIN '
+            else:
+                sql += ' LEFT OUTER JOIN '
+            sql += fk[3] + ' k' + str(fki) + ' ON k' + str(fki) + '.' + fk[4] +\
+                ' = ' + schema_name + '.' + fk[0]
 
-    # TODO make the readAll take an optional "rowStart, rowEnd" argument
     ret = [
         '',
         '    public function countRows($db) {',
@@ -340,7 +347,9 @@ def process_columns(schema_name, columns):
                     raise Exception(schema_name + " column " + column.name +
                                     " has multiple primary keys")
                 primary_key_column = column
-            elif constraint.constraint_type == 'foreignkey':
+            elif (constraint.constraint_type == 'foreignkey'
+                    or constraint.constraint_type == 'falseforeignkey'
+                    or constraint.constraint_type == 'fakeforeignkey'):
                 if 'columns' in constraint.details:
                     raise Exception(schema_name + ": we do not handle multiple "
                                                   "column foreign keys")
@@ -351,7 +360,8 @@ def process_columns(schema_name, columns):
                 foreign_keys.append([
                     column.name, cn, cno + '_fk',
                     constraint.details['table'],
-                    constraint.details['column'], is_owner])
+                    constraint.details['column'], is_owner,
+                    constraint.constraint_type == 'foreignkey'])
             elif constraint.constraint_type == 'phpvalidation':
                 php_validation.append([
                     column.name, cn, cno,
