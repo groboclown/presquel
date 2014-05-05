@@ -177,12 +177,18 @@ class SchemaParser(object):
                         else:
                             self._error('only "column" is allowed inside '
                                         '"columns"')
-            elif k == 'constraint':
-                constraints.append(self._parse_table_constraint(v))
             elif k == 'constraints':
-                assert isinstance(v, tuple) or isinstance(v, list)
-                for c in v:
-                    constraints.append(self._parse_table_constraint(c))
+                if not (isinstance(v, tuple) or isinstance(v, list)):
+                    self._error('"constraints" must be a list of "constraint", '
+                                'but found ' + repr(v))
+                for con in v:
+                    for (kk, vv) in con.items():
+                        if kk == 'constraint':
+                            constraints.append(
+                                self._parse_column_constraint(vv))
+                        else:
+                            self._error('"constraints" must contain only'
+                                        ' "constraint", but found ' + repr(kk))
             else:
                 self._parse_common_keyval(k, v)
 
@@ -323,14 +329,7 @@ class SchemaParser(object):
             elif k == 'changes':
                 assert isinstance(v, tuple) or isinstance(v, list)
                 for ch in v:
-                    for (kk, vv) in ch.items():
-                        kk = _strip_key(kk)
-                        if kk == 'change':
-                            changes.append(self._parse_inner_change(
-                                vv, COLUMN_TYPE))
-                        else:
-                            self._error('only "change" is allowed inside '
-                                        '"changes"')
+                    changes.append(self._parse_inner_change(ch, COLUMN_TYPE))
             elif k == 'name':
                 name = str(v).strip()
             elif k == 'type':
@@ -350,21 +349,18 @@ class SchemaParser(object):
             elif k == 'position':
                 position = int(v)
                 assert position >= 0
-            elif k == 'constraint':
-                constraints.append(self._parse_column_constraint(v))
             elif k == 'constraints':
                 if not (isinstance(v, tuple) or isinstance(v, list)):
                     self._error('"constraints" must be a list of "constraint", '
                                 'but found '+repr(v))
                 for con in v:
                     for (kk, vv) in con.items():
-                        kk = _strip_key(kk)
                         if kk == 'constraint':
                             constraints.append(
-                                self._parse_column_constraint(con))
+                                self._parse_column_constraint(vv))
                         else:
-                            self._error('"constraints" can only contain '
-                                        '"constraint"')
+                            self._error('"constraints" must contain only'
+                                        ' "constraint", but found ' + repr(kk))
             else:
                 self._parse_common_keyval(k, v)
 
