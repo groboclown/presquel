@@ -10,22 +10,25 @@ FAIL_IF_EXISTS = True
 parent_class = None
 namespace = None
 output_dir = None
+schema_by_name = {}
 
 
-def generate_file(schema_name, columns, table_constraints, read_only):
-    class_name = generate_php_name(schema_name)
+def generate_file(schema_obj, processed_columns, read_only):
+    assert (isinstance(schema_obj, sqlmigration.model.Table)
+            or isinstance(schema_obj, sqlmigration.model.View))
+    assert isinstance(processed_columns, ProcessedColumnSet)
+
+    class_name = generate_php_name(schema_obj.name)
     file_name = os.path.join(output_dir, class_name + '.php')
     if os.path.exists(file_name) and FAIL_IF_EXISTS:
         raise Exception("Will not overwrite " + file_name)
 
-    processed_columns = process_columns(schema_name, columns)
     table_validations = []
-    for constraint in table_constraints:
+    for constraint in schema_obj.constraints:
         assert isinstance(constraint, sqlmigration.model.TableConstraint)
         if constraint.constraint_type == 'phpvalidation':
-            table_validations.append(['Table', None,
-                                      'Table' + str(constraint.order),
-                                      constraint.details['script']])
+            table_validations.append(ProcessedPhpValidationConstraint(
+                None, constraint, 'table', schema_obj.name))
 
     uses = ''
     if parent_class.count('\\') > 0:
@@ -41,53 +44,75 @@ def generate_file(schema_name, columns, table_constraints, read_only):
             uses,
             '', '',
             '/**',
-            ' * DBO object for ' + schema_name,
+            ' * DBO object for ' + schema_obj.name,
             ' *',
             ' * Generated on ' + time.asctime(time.gmtime(time.time())),
             ' */',
             'class ' + class_name + ' extends ' + parent_class + ' {',
+            '    public $errors = array();', '',
+            '    private function checkForErrors($db) {',
+            '        $errs = $db->errorInfo();',
+            '        if ($errs[1] != null) {',
+            '            $errors[] = $errs[2];',
+            '        }',
+            '        return false;',
+            '    }', '',
         ])
-        f.writelines(line + '\n' for line in
-                     generate_read(schema_name, columns, processed_columns))
+        f.writelines(line + '\n' for line in generate_read(
+            schema_obj, processed_columns))
 
         if not read_only:
-            f.writelines(line + '\n' for line in
-                         generate_create(schema_name, columns,
-                                         processed_columns))
-            f.writelines(line + '\n' for line in
-                         generate_update(schema_name, columns,
-                                         processed_columns))
-            f.writelines(line + '\n' for line in
-                         generate_delete(schema_name, columns,
-                                         processed_columns))
+            f.writelines((line + '\n') for line in generate_create(
+                schema_obj, processed_columns))
+            f.writelines((line + '\n') for line in generate_update(
+                schema_obj, processed_columns))
+            f.writelines(line + '\n' for line in generate_delete(
+                schema_obj, processed_columns))
 
-        f.writelines(line + '\n' for line in
-                     generate_validations(table_validations, processed_columns))
+        f.writelines((line + '\n') for line in generate_validations(
+            table_validations, processed_columns))
 
         f.writelines('\n}\n')
 
 
-def generate_read(schema_name, columns, processed_columns):
+def generate_read(schema_obj, processed_columns):
+    assert (isinstance(schema_obj, sqlmigration.model.Table)
+            or isinstance(schema_obj, sqlmigration.model.View))
+    assert isinstance(processed_columns, ProcessedColumnSet)
+
     # FIXME this needs to know the foreign tables, so that it can properly
     # separate (via alias) the foreign column names.
-    sql = 'SELECT * FROM ' + schema_name
+
+    join = ''
     fki = 0
-    for fk in processed_columns['foreign_keys']:
+    # include the foreign key here, for reference
+    col_names = []
+    col_names.extend((schema_obj.name + '.' + col.name + ' AS ' + col.name)
+                     for col in schema_obj.columns)
+    for fk in processed_columns.foreign_keys:
+        assert isinstance(fk, ProcessedForeignKeyConstraint)
         fki += 1
-        if not fk[5]:
-            if fk[6]:
-                sql += ' INNER JOIN '
+        fk_name = 'k' + str(fki)
+        # Don't pick up the parent owning object in the join
+        if not fk.is_owner:
+            if fk.is_real_fk:
+                join += ' INNER JOIN '
             else:
-                sql += ' LEFT OUTER JOIN '
-            sql += fk[3] + ' k' + str(fki) + ' ON k' + str(fki) + '.' + fk[4] +\
-                ' = ' + schema_name + '.' + fk[0]
+                join += ' LEFT OUTER JOIN '
+            join += (fk.fk_table_name + ' ' + fk_name + ' ON ' + fk_name + '.' +
+                     fk.fk_column_name + ' = ' + schema_obj.name + '.' +
+                     fk.column_name)
+            col_names.append(fk_name + '.' + fk.fk_column_name + ' AS ' +
+                             fk.fk_table_name + '__' + fk.fk_column_name)
+    sql = 'SELECT ' + ','.join(col_names) + ' FROM ' + schema_obj.name + join
 
     ret = [
         '',
         '    public function countRows($db) {',
-        '        $stmt = $db->prepare(\'SELECT COUNT(*) FROM ' + schema_name +
-        '\');',
+        '        $stmt = $db->prepare(\'SELECT COUNT(*) FROM ' +
+        schema_obj.name + '\');',
         '        $stmt->execute();',
+        '        if ($this->checkForErrors($db)) { return false; }',
         '        return $stmt->fetchColumn();',
         '    }', '', '',
         '    public function readAll($db, $order = false, $start = -1, '
@@ -95,9 +120,9 @@ def generate_read(schema_name, columns, processed_columns):
         '        $sql = \'' + sql.replace("'", "''") + ' ORDER BY \';',
         '        if (! $order) {',
         '            $sql .= \'' +
-        processed_columns['primary_key_column'].name + '\';',
+        processed_columns.primary_key_column.name + '\';',
         '        } else {',
-        '            $sql .= $oder;',
+        '            $sql .= $order;',
         '        }',
         '        if ($start >= 0 && $end > 0) {',
         '            $sql .= \' LIMIT \'.$start.\',\'.$end;',
@@ -105,6 +130,7 @@ def generate_read(schema_name, columns, processed_columns):
         '        $stmt = $db->prepare($sql);',
         '        $stmt->setFetchMode(PDO::FETCH_ASSOC);',
         '        $stmt->execute();',
+        '        if ($this->checkForErrors($db)) { return false; }',
         '        $rows = array();',
         '        foreach ($stmt->fetchAll() as $row) {',
         '            if (!$this->validateRead($row)) {',
@@ -114,14 +140,13 @@ def generate_read(schema_name, columns, processed_columns):
         '        }',
         '        return $rows;',
         '    }', '', '',
-        '    public function read($id) {',
-        '        if ((! $id && $id != 0) || !is_int($id)) {',
-        '            return False;',
-        '        }',
+        '    public function read($db, $id) {',
         '        $stmt = $db->prepare(\'' + sql.replace("'", "''") + ' WHERE ' +
-        processed_columns['primary_key_column'].name + ' = ?\');',
+        schema_obj.name + '.' + processed_columns.primary_key_column.name +
+        ' = ? LIMIT 1\');',
         '        $stmt->setFetchMode(PDO::FETCH_ASSOC);',
-        '        $stmt->execute($id);',
+        '        $stmt->execute(array($id));',
+        '        if ($this->checkForErrors($db)) { return false; }',
         '        $row = $stmt->fetch();',
         '        if (!$row) {',
         '            return False;',
@@ -132,20 +157,18 @@ def generate_read(schema_name, columns, processed_columns):
         '        return $row;',
         '    }', ''
     ]
-    for fk in processed_columns['foreign_keys']:
-        if fk[5]:
+    for fk in processed_columns.foreign_keys:
+        assert isinstance(fk, ProcessedForeignKeyConstraint)
+        if fk.is_owner:
             ret.extend([
                 '',
-                '    public function readFor' + fk[1] +
+                '    public function readFor' + fk.php_name +
                 '($db, $id, $order = false, $start = -1, $end = -1) {',
-                '        if ((! $id && $id != 0) || !is_int($id)) {',
-                '            return False;',
-                '        }',
                 '        $sql = \'' + sql.replace("'", "''") +
-                ' WHERE ' + fk[0] + ' = ? ORDER BY \';',
+                ' WHERE ' + fk.column_name + ' = ? ORDER BY \';',
                 '        if (! $order) {',
-                '            $sql = \'' + processed_columns[
-                    'primary_key_column'].name + '\';',
+                '            $sql = \'' + processed_columns.
+                primary_key_column.name + '\';',
                 '        } else {',
                 '            $sql = $order;',
                 '        }',
@@ -155,6 +178,7 @@ def generate_read(schema_name, columns, processed_columns):
                 '        $stmt = $db->prepare($sql);',
                 '        $stmt->setFetchMode(PDO::FETCH_ASSOC);',
                 '        $stmt->execute(array($id));',
+                '        if ($this->checkForErrors($db)) { return false; }',
                 '        $rows = array();',
                 '        foreach ($stmt->fetchAll() as $row) {',
                 '            if (!$this->validateRead($row)) {',
@@ -170,12 +194,16 @@ def generate_read(schema_name, columns, processed_columns):
     return ret
 
 
-def generate_create(schema_name, columns, processed_columns):
+def generate_create(schema_obj, processed_columns):
+    assert (isinstance(schema_obj, sqlmigration.model.Table)
+            or isinstance(schema_obj, sqlmigration.model.View))
+    assert isinstance(processed_columns, ProcessedColumnSet)
+
     column_names = []
     date_cols = []
     date_vals = []
-    for column in columns:
-        if column != processed_columns['primary_key_column']:
+    for column in schema_obj.columns:
+        if column != processed_columns.primary_key_column:
             # Special handlers for the creation date.  This is specific
             # to the WebRiffs standards
             if column.name.lower() == 'created_on':
@@ -190,12 +218,12 @@ def generate_create(schema_name, columns, processed_columns):
     cns = []
     cns.extend(column_names)
     cns.extend(date_cols)
-    vals = []
-    vals.extend(':' + cn for cn in column_names)
-    vals.extend(date_vals)
-    sql = ('INSERT INTO ' + schema_name + ' (' +
+    values = []
+    values.extend(':' + cn for cn in column_names)
+    values.extend(date_vals)
+    sql = ('INSERT INTO ' + schema_obj.name + ' (' +
            (','.join(cns)) +
-           ') VALUES (' + (','.join(vals)) + ')')
+           ') VALUES (' + (','.join(values)) + ')')
 
     ret = [
         '',
@@ -204,11 +232,10 @@ def generate_create(schema_name, columns, processed_columns):
         '            return False;',
         '        }',
         '        $stmt = $db->prepare(\'' + sql.replace("'", "''") + '\');',
-        '        if (! $stmt->execute($data)) {',
-        '            $this->insertFailed(\'' + schema_name + '\', $data);',
-        '        }',
+        '        $stmt->execute($data);',
+        '        if ($this->checkForErrors($db)) { return false; }',
         '        $id = $db->lastInsertId();',
-        '        $data["' + processed_columns['primary_key_column'].name +
+        '        $data["' + processed_columns.primary_key_column.name +
         '"] = $id;',
         '        return $data;',
         '    }',
@@ -218,15 +245,19 @@ def generate_create(schema_name, columns, processed_columns):
     return ret
 
 
-def generate_update(schema_name, columns, processed_columns):
+def generate_update(schema_obj, processed_columns):
+    assert (isinstance(schema_obj, sqlmigration.model.Table)
+            or isinstance(schema_obj, sqlmigration.model.View))
+    assert isinstance(processed_columns, ProcessedColumnSet)
+
     column_names = []
-    for column in columns:
-        if column != processed_columns['primary_key_column']:
+    for column in schema_obj.columns:
+        if column != processed_columns.primary_key_column:
             column_names.append(column.name)
-    sql = 'UPDATE ' + schema_name +\
+    sql = 'UPDATE ' + schema_obj.name +\
           (','.join((' SET ' + cn + ' = :' + cn) for cn in column_names)) +\
-          ' WHERE ' + processed_columns['primary_key_column'].name + ' = :' + \
-          processed_columns['primary_key_column'].name
+          ' WHERE ' + processed_columns.primary_key_column.name + ' = :' + \
+          processed_columns.primary_key_column.name
 
     ret = [
         '',
@@ -236,6 +267,7 @@ def generate_update(schema_name, columns, processed_columns):
         '        }',
         '        $stmt = $db->prepare(\'' + sql.replace("'", "''") + '\');',
         '        $stmt->execute($data);',
+        '        if ($this->checkForErrors($db)) { return false; }',
         '        return $data;',
         '    }', ''
     ]
@@ -243,17 +275,22 @@ def generate_update(schema_name, columns, processed_columns):
     return ret
 
 
-def generate_delete(schema_name, columns, processed_columns):
-    sql = 'DELETE FROM ' + schema_name + ' WHERE ' + processed_columns[
-        'primary_key_column'].name + ' = :' + \
-        processed_columns['primary_key_column'].name
+def generate_delete(schema_obj, processed_columns):
+    assert (isinstance(schema_obj, sqlmigration.model.Table)
+            or isinstance(schema_obj, sqlmigration.model.View))
+    assert isinstance(processed_columns, ProcessedColumnSet)
+
+    sql = ('DELETE FROM ' + schema_obj.name + ' WHERE ' + processed_columns.
+           primary_key_column.name + ' = :' +
+           processed_columns.primary_key_column.name)
 
     ret = [
         '',
         '    public function remove($db, $data) {',
         '        $stmt = $db->prepare(\'' + sql.replace("'", "''") + '\');',
         '        $stmt->execute($data);',
-        '        return False;',
+        '        if ($this->checkForErrors($db)) { return false; }',
+        '        return true;',
         '    }'
         '',
     ]
@@ -262,6 +299,8 @@ def generate_delete(schema_name, columns, processed_columns):
 
 
 def generate_validations(table_validations, processed_columns):
+    assert isinstance(processed_columns, ProcessedColumnSet)
+
     table_validates = [
         '',
         '    private function validateTable(&$row) {',
@@ -282,22 +321,27 @@ def generate_validations(table_validations, processed_columns):
 
     # Always run the validation, by having it appear before the '&& $ret',
     # so that the parent class can collect all of the validation errors.
-    for v in processed_columns['php_read']:
-        read_validates.append('        $ret = $this->validate' + v[2] +
+
+    for v in processed_columns.php_read:
+        assert isinstance(v, ProcessedPhpValidationConstraint)
+        read_validates.append('        $ret = $this->validate' + v.order_name +
                               '($row) && $ret;')
         ret.extend(generate_validation(v))
-    for v in processed_columns['php_write']:
-        write_validates.append('        $ret = $this->validate' + v[2] +
+    for v in processed_columns.php_write:
+        assert isinstance(v, ProcessedPhpValidationConstraint)
+        write_validates.append('        $ret = $this->validate' + v.order_name +
                                '($row) && $ret;')
         ret.extend(generate_validation(v))
-    for v in processed_columns['php_validation']:
-        write_validates.append('        $ret = $this->validate' + v[2] +
+    for v in processed_columns.php_validation:
+        assert isinstance(v, ProcessedPhpValidationConstraint)
+        write_validates.append('        $ret = $this->validate' + v.order_name +
                                '($row) && $ret;')
         ret.extend(generate_validation(v))
 
     for validation in table_validations:
+        assert isinstance(validation, ProcessedPhpValidationConstraint)
         table_validates.append('        $ret = $this->validate' +
-                               validation[2] + '($row) && $ret;')
+                               validation.order_name + '($row) && $ret;')
         ret.extend(generate_validation(validation))
 
     table_validates.extend(['        return $this->finalCheck($ret);', '    }',
@@ -313,79 +357,107 @@ def generate_validations(table_validations, processed_columns):
 
 
 def generate_validation(validation):
-    (schema_name, php_name, validation_name, script) = validation
+    assert isinstance(validation, ProcessedPhpValidationConstraint)
 
     ret = [
         '',
-        '    private function validate' + validation_name + '(&$row) {',
+        '    private function validate' + validation.order_name + '(&$row) {',
     ]
 
-    if php_name is not None:
-        ret.append('        $' + php_name + ' = $row["' + php_name + '"];')
+    if validation.php_name is not None:
+        ret.append('        $' + validation.php_name + ' = $row["' +
+                   validation.php_name + '"];')
     ret.extend([
         '        return $this->ensure(' + ('            '.join(
-        line for line in script.splitlines())) + ', "' + schema_name + '");',
-        '    }', ''
+        line for line in validation.script.splitlines())) + ', "' +
+        validation.column_name + '");', '    }', ''
     ])
     return ret
 
 
-def process_columns(schema_name, columns):
-    primary_key_column = None
-    foreign_keys = []
-    php_read = []
-    php_write = []
-    php_validation = []
-    for column in columns:
+class AbstractProcessedConstraint(object):
+    def __init__(self, column, constraint, name=None):
         assert isinstance(column, sqlmigration.model.Column)
-        cn = generate_php_name(column.name)
-        for constraint in column.constraints:
-            cno = cn + '_' + str(constraint.order)
-            assert isinstance(constraint, sqlmigration.model.ColumnConstraint)
-            if constraint.constraint_type == 'primarykey':
-                if primary_key_column is not None:
-                    raise Exception(schema_name + " column " + column.name +
-                                    " has multiple primary keys")
-                primary_key_column = column
-            elif (constraint.constraint_type == 'foreignkey'
-                    or constraint.constraint_type == 'falseforeignkey'
-                    or constraint.constraint_type == 'fakeforeignkey'):
-                if 'columns' in constraint.details:
-                    raise Exception(schema_name + ": we do not handle multiple "
-                                                  "column foreign keys")
-                is_owner = False
-                if ('relationship' in constraint.details and
-                        constraint.details['relationship'].lower() == 'owner'):
-                    is_owner = True
-                foreign_keys.append([
-                    column.name, cn, cno + '_fk',
-                    constraint.details['table'],
-                    constraint.details['column'], is_owner,
-                    constraint.constraint_type == 'foreignkey'])
-            elif constraint.constraint_type == 'phpvalidation':
-                php_validation.append([
-                    column.name, cn, cno,
-                    constraint.details['script']
-                ])
-            elif constraint.constraint_type == 'phpread':
-                php_read.append([
-                    column.name, cn, cno + '_read',
-                    constraint.details['script']
-                ])
-            elif constraint.constraint_type == 'phpwrite':
-                php_write.append([
-                    column.name, cn, cno + '_write',
-                    constraint.details['script']
-                ])
-    if primary_key_column is None:
-        raise Exception("No primary keys found")
-    return {
-        'primary_key_column': primary_key_column,
-        'foreign_keys': foreign_keys,
-        'php_read': php_read,
-        'php_write': php_write,
-        'php_validation': php_validation
-    }
+        assert isinstance(constraint, sqlmigration.model.ColumnConstraint)
+
+        object.__init__(self)
+        self.column = column
+        self.constraint = constraint
+        self.column_name = name or column.name
+        self.php_name = generate_php_name(self.column_name)
+        self.order_name = self.php_name + '_' + str(constraint.order)
+
+
+class ProcessedForeignKeyConstraint(AbstractProcessedConstraint):
+    def __init__(self, column, constraint):
+        AbstractProcessedConstraint.__init__(self, column, constraint)
+
+        if 'columns' in constraint.details:
+            raise Exception(
+                column.name + ": we do not handle multiple "
+                "column foreign keys")
+        self.order_name += '_fk'
+        self.is_owner = False
+        if ('relationship' in constraint.details and
+                constraint.details['relationship'].lower() == 'owner'):
+            self.is_owner = True
+        self.is_real_fk = constraint.constraint_type == 'foreignkey'
+        self.fk_column_name = constraint.details['column']
+        self.fk_table_name = constraint.details['table']
+        self.remote_table = None
+        if self.fk_table_name in schema_by_name:
+            self.remote_table = schema_by_name[self.fk_table_name]
+
+
+class ProcessedPhpValidationConstraint(AbstractProcessedConstraint):
+    def __init__(self, column, constraint, validation_type, name=None):
+        AbstractProcessedConstraint.__init__(self, column, constraint, name)
+        self.script = constraint.details['script']
+        self.order_name += '_' + validation_type
+
+
+class ProcessedColumnSet(object):
+    def __init__(self, schema_obj):
+        object.__init__(self)
+        assert (isinstance(schema_obj, sqlmigration.model.Table)
+                or isinstance(schema_obj, sqlmigration.model.View))
+
+        self.primary_key_column = None
+        self.foreign_keys = []
+        self.php_read = []
+        self.php_write = []
+        self.php_validation = []
+        for column in schema_obj.columns:
+            assert isinstance(column, sqlmigration.model.Column)
+
+            for constraint in column.constraints:
+                assert isinstance(constraint,
+                                  sqlmigration.model.ColumnConstraint)
+
+                if constraint.constraint_type == 'primarykey':
+                    if self.primary_key_column is not None:
+                        raise Exception(
+                            schema_obj.name + " column " + column.name +
+                            " has multiple primary keys")
+                    self.primary_key_column = column
+
+                elif (constraint.constraint_type == 'foreignkey'
+                        or constraint.constraint_type == 'falseforeignkey'
+                        or constraint.constraint_type == 'fakeforeignkey'):
+                    self.foreign_keys.append(ProcessedForeignKeyConstraint(
+                        column, constraint))
+
+                elif constraint.constraint_type == 'phpvalidation':
+                    self.php_validation.append(ProcessedPhpValidationConstraint(
+                        column, constraint, 'validation'))
+                elif constraint.constraint_type == 'phpread':
+                    self.php_read.append(ProcessedPhpValidationConstraint(
+                        column, constraint, 'read'))
+                elif constraint.constraint_type == 'phpwrite':
+                    self.php_write.append(ProcessedPhpValidationConstraint(
+                        column, constraint, 'write'))
+        if self.primary_key_column is None:
+            raise Exception("No primary keys found")
 
 
 def generate_php_name(schema_name):
@@ -412,12 +484,19 @@ if __name__ == '__main__':
         raise Exception("no versions found")
 
     head = versions[0]
+    processed_column_map = {}
+
+    # Step 1: process all the columns
+    for schema in head.schema:
+        if (isinstance(schema, sqlmigration.model.Table)
+                or isinstance(schema, sqlmigration.model.View)):
+            processed_column_map[schema] = ProcessedColumnSet(schema)
+            schema_by_name[schema.name] = schema
 
     for schema in head.schema:
         if isinstance(schema, sqlmigration.model.Table):
-            print("Table " + schema.name)
-            generate_file(schema.table_name, schema.columns,
-                          schema.table_constraints, False)
+            print("Processing " + schema.name)
+            generate_file(schema, processed_column_map[schema], False)
         elif isinstance(schema, sqlmigration.model.View):
             print("View " + schema.name)
-            generate_file(schema.view_name, schema.columns, [], True)
+            generate_file(schema, processed_column_map[schema], True)

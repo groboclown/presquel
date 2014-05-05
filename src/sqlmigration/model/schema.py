@@ -42,6 +42,10 @@ class SchemaObject(BaseObject):
         """
         return []
 
+    @property
+    def constraints(self):
+        return []
+
 
 class ValueTypeValue(object):
     """
@@ -233,7 +237,7 @@ class Table(SchemaObject):
         return self.__columns
 
     @property
-    def table_constraints(self):
+    def constraints(self):
         return self.__table_constraints
 
     @property
