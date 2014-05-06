@@ -185,7 +185,7 @@ class SchemaParser(object):
                     for (kk, vv) in con.items():
                         if kk == 'constraint':
                             constraints.append(
-                                self._parse_column_constraint(vv))
+                                self._parse_constraint(vv, False))
                         else:
                             self._error('"constraints" must contain only'
                                         ' "constraint", but found ' + repr(kk))
@@ -208,6 +208,7 @@ class SchemaParser(object):
         view_name = None
         select_query = None
         columns = []
+        constraints = []
         changes = []
 
         for (k, v) in d.items():
@@ -246,12 +247,25 @@ class SchemaParser(object):
                 assert isinstance(v, tuple) or isinstance(v, list)
                 for col in v:
                     columns.append(self._parse_column(col))
+            elif k == 'constraints':
+                if not (isinstance(v, tuple) or isinstance(v, list)):
+                    self._error('"constraints" must be a list of "constraint", '
+                                'but found ' + repr(v))
+                for con in v:
+                    for (kk, vv) in con.items():
+                        if kk == 'constraint':
+                            constraints.append(
+                                self._parse_constraint(vv, False))
+                        else:
+                            self._error('"constraints" must contain only'
+                                        ' "constraint", but found ' + repr(kk))
             else:
                 self._parse_common_keyval(k, v)
 
         assert select_query is not None and len(select_query) > 0
         return View(order, comment, catalog_name, replace_if_exists,
-                    schema_name, view_name, select_query, columns, changes)
+                    schema_name, view_name, select_query, columns, constraints,
+                    changes)
 
     def _parse_procedure(self, d):
         raise Exception("not implemented")
@@ -357,7 +371,7 @@ class SchemaParser(object):
                     for (kk, vv) in con.items():
                         if kk == 'constraint':
                             constraints.append(
-                                self._parse_column_constraint(vv))
+                                self._parse_constraint(vv, True))
                         else:
                             self._error('"constraints" must contain only'
                                         ' "constraint", but found ' + repr(kk))
@@ -370,7 +384,7 @@ class SchemaParser(object):
                       auto_increment, remarks, before_column, after_column,
                       position, constraints, changes)
 
-    def _parse_column_constraint(self, d):
+    def _parse_constraint(self, d, is_column):
         assert isinstance(d, dict)
 
         comment = None
@@ -407,8 +421,12 @@ class SchemaParser(object):
                     details[k] = v
 
         assert constraint_type is not None and len(constraint_type) > 0
-        return ColumnConstraint(order, comment, constraint_type, details,
-                                changes)
+        if is_column:
+            return ColumnConstraint(order, comment, constraint_type, details,
+                                    changes)
+        else:
+            return TableConstraint(order, comment, constraint_type, details,
+                                   changes)
 
     def _parse_table_constraint(self, d):
         assert isinstance(d, dict)
@@ -489,13 +507,13 @@ class SchemaParser(object):
                 (vt is not None and vt.startswith('numeric'))):
             return ValueTypeValue(None, val, None, None, None)
         elif vt == 'bool' or vt == 'boolean':
-            return ValueTypeValue(None, None, _parse_boolean(v), None, None)
+            return ValueTypeValue(None, None, _parse_boolean(val), None, None)
         elif vt == 'date' or vt == 'time' or vt == 'datetime':
-            return ValueTypeValue(None, None, None, str(v), None)
+            return ValueTypeValue(None, None, None, str(val), None)
         elif vt == 'computed' or vt == 'sql':
-            return ValueTypeValue(None, None, None, None, str(v))
+            return ValueTypeValue(None, None, None, None, str(val))
         elif vt == 'str' or vt == 'string' or vt == 'char' or vt == 'varchar':
-            return ValueTypeValue(str(v), None, None, None, None)
+            return ValueTypeValue(str(val), None, None, None, None)
 
 
 def _parse_schema_type(type_name):

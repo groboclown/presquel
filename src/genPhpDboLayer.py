@@ -25,6 +25,9 @@ def generate_file(schema_obj, processed_columns, read_only):
 
     table_validations = []
     for constraint in schema_obj.constraints:
+        if not isinstance(constraint, sqlmigration.model.TableConstraint):
+            raise Exception("expected TableConstraint, found " +
+                            str(type(constraint)))
         assert isinstance(constraint, sqlmigration.model.TableConstraint)
         if constraint.constraint_type == 'phpvalidation':
             table_validations.append(ProcessedPhpValidationConstraint(
@@ -49,6 +52,7 @@ def generate_file(schema_obj, processed_columns, read_only):
             ' * Generated on ' + time.asctime(time.gmtime(time.time())),
             ' */',
             'class ' + class_name + ' extends ' + parent_class + ' {',
+            '    public static $INSTANCE;',
             '    public $errors = array();', '',
             '    private function checkForErrors($db) {',
             '        $errs = $db->errorInfo();',
@@ -72,7 +76,8 @@ def generate_file(schema_obj, processed_columns, read_only):
         f.writelines((line + '\n') for line in generate_validations(
             table_validations, processed_columns))
 
-        f.writelines('\n}\n')
+        f.writelines('\n}\n' + class_name + '::$INSTANCE = new ' +
+                     class_name + ';\n')
 
 
 def generate_read(schema_obj, processed_columns):
@@ -94,7 +99,7 @@ def generate_read(schema_obj, processed_columns):
         fki += 1
         fk_name = 'k' + str(fki)
         # Don't pick up the parent owning object in the join
-        if not fk.is_owner:
+        if not fk.is_owner and fk.join:
             if fk.is_real_fk:
                 join += ' INNER JOIN '
             else:
@@ -108,7 +113,7 @@ def generate_read(schema_obj, processed_columns):
 
     ret = [
         '',
-        '    public function countRows($db) {',
+        '    public function countAll($db) {',
         '        $stmt = $db->prepare(\'SELECT COUNT(*) FROM ' +
         schema_obj.name + '\');',
         '        $stmt->execute();',
@@ -155,13 +160,86 @@ def generate_read(schema_obj, processed_columns):
         '            return False;',
         '        }',
         '        return $row;',
-        '    }', ''
+        '    }', '', '',
+        '    public function countAny($db, $whereClause, $data) {',
+        '        $stmt = $db->prepare(\'SELECT COUNT(*) FROM ' +
+        schema_obj.name + ' \'.$whereClause);',
+        '        $stmt->execute($data);',
+        '        if ($this->checkForErrors($db)) { return false; }',
+        '        return $stmt->fetchColumn();',
+        '    }', '', '',
+        '    public function readAny($db, $query, $data, $start = -1, '
+        '$end = -1) {',
+        '        if ($start >= 0 && $end > 0) {',
+        '            $query .= \' LIMIT \'.$start.\',\'.$end;',
+        '        }',
+        '        $stmt = $db->prepare($query);',
+        '        $stmt->setFetchMode(PDO::FETCH_ASSOC);',
+        '        $stmt->execute();',
+        '        if ($this->checkForErrors($db)) { return false; }',
+        '        $rows = $stmt->fetchAll();',
+        '        return $rows;',
+        '    }',
+        '',
     ]
+
+    for readby in processed_columns.table_reads:
+        title = '_x_'.join(col.replace('.', '__') for col in readby)
+        arglist = [('$' + col.replace('.', '__')) for col in readby]
+        args = ', '.join(arglist)
+        readbysql = sql + ' WHERE ' + (' AND '.join(
+            (col + ' = ?' for col in readby)))
+        ret.extend([
+            '',
+            '    public function countBy' + title + '($db, ' + args + ') {',
+            '        $sql = \'' + readbysql.replace("'", "''") + '\';',
+            '        $stmt = $db->prepare($sql);',
+            '        $stmt->execute(array(' + args + '));',
+            '        if ($this->checkForErrors($db)) { return false; }',
+            '        return $stmt->fetchColumn();',
+            '    }', '' '',
+            '    public function readBy' + title + '($db, ' + args +
+            ', $order = false, $start = -1, $end = -1) {',
+            '        $sql = \'' + readbysql.replace("'", "''") +
+            ' ORDER BY \';',
+            '        if (! $order) {',
+            '            $sql = \'' + processed_columns.
+            primary_key_column.name + '\';',
+            '        } else {',
+            '            $sql = $order;',
+            '        }',
+            '        if ($start >= 0 && $end > 0) {',
+            '            $sql .= \' LIMIT \'.$start.\',\'.$end;',
+            '        }',
+            '        $stmt = $db->prepare($sql);',
+            '        $stmt->setFetchMode(PDO::FETCH_ASSOC);',
+            '        $stmt->execute(array(' + args + '));',
+            '        if ($this->checkForErrors($db)) { return false; }',
+            '        $rows = array();',
+            '        foreach ($stmt->fetchAll() as $row) {',
+            '            if (!$this->validateRead($row)) {',
+            '                return false;',
+            '            }',
+            '            $rows[] = $row;',
+            '        }',
+            '        return $rows;',
+            '    }',
+            ''
+        ])
+
     for fk in processed_columns.foreign_keys:
         assert isinstance(fk, ProcessedForeignKeyConstraint)
         if fk.is_owner:
             ret.extend([
                 '',
+                '    public function countFor' + fk.php_name + '($db, $id) {',
+                '        $sql = \'' + sql.replace("'", "''") +
+                ' WHERE ' + fk.column_name + ' = ?\';',
+                '        $stmt = $db->prepare($sql);',
+                '        $stmt->execute(array($id));',
+                '        if ($this->checkForErrors($db)) { return false; }',
+                '        return $stmt->fetchColumn();',
+                '    }', '', '',
                 '    public function readFor' + fk.php_name +
                 '($db, $id, $order = false, $start = -1, $end = -1) {',
                 '        $sql = \'' + sql.replace("'", "''") +
@@ -250,12 +328,26 @@ def generate_update(schema_obj, processed_columns):
             or isinstance(schema_obj, sqlmigration.model.View))
     assert isinstance(processed_columns, ProcessedColumnSet)
 
-    column_names = []
+    column_order = []
+    column_name_values = {}
     for column in schema_obj.columns:
         if column != processed_columns.primary_key_column:
-            column_names.append(column.name)
-    sql = 'UPDATE ' + schema_obj.name +\
-          (','.join((' SET ' + cn + ' = :' + cn) for cn in column_names)) +\
+            # Special handlers for the creation date.  This is specific
+            # to the WebRiffs standards
+            if column.name.lower() == 'created_on':
+                # Never update this column
+                pass
+            elif column.name.lower() == 'last_updated_on':
+                column_order.append(column.name)
+                column_name_values[column.name] = 'NOW()'
+                # MySql flavor
+            else:
+                column_order.append(column.name)
+                column_name_values[column.name] = ':' + column.name
+
+    sql = 'UPDATE ' + schema_obj.name + ' SET ' +\
+          (','.join((cn + ' = ' + column_name_values[cn])
+                    for cn in column_order)) +\
           ' WHERE ' + processed_columns.primary_key_column.name + ' = :' + \
           processed_columns.primary_key_column.name
 
@@ -407,6 +499,10 @@ class ProcessedForeignKeyConstraint(AbstractProcessedConstraint):
         self.remote_table = None
         if self.fk_table_name in schema_by_name:
             self.remote_table = schema_by_name[self.fk_table_name]
+        self.join = False
+        if ('pull' in constraint.details
+                and constraint.details['pull'] == 'always'):
+            self.join = True
 
 
 class ProcessedPhpValidationConstraint(AbstractProcessedConstraint):
@@ -427,6 +523,7 @@ class ProcessedColumnSet(object):
         self.php_read = []
         self.php_write = []
         self.php_validation = []
+        self.table_reads = []
         for column in schema_obj.columns:
             assert isinstance(column, sqlmigration.model.Column)
 
@@ -456,6 +553,15 @@ class ProcessedColumnSet(object):
                 elif constraint.constraint_type == 'phpwrite':
                     self.php_write.append(ProcessedPhpValidationConstraint(
                         column, constraint, 'write'))
+
+        for constraint in schema_obj.constraints:
+            assert isinstance(constraint, sqlmigration.model.TableConstraint)
+
+            if constraint.constraint_type == 'read':
+                self.table_reads.append(
+                    [col.strip() for col in
+                    constraint.details['columns'].split(',')])
+
         if self.primary_key_column is None:
             raise Exception("No primary keys found")
 

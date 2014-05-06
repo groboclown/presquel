@@ -81,7 +81,7 @@ class ValueTypeValue(object):
         return self.__computed_value
 
 
-class ColumnConstraint(SchemaObject):
+class Constraint(SchemaObject):
     def __init__(self, order, comment, constraint_type, details, changes):
         SchemaObject.__init__(self, constraint_type, order, comment,
                               CONSTRAINT_TYPE, changes)
@@ -108,30 +108,16 @@ class ColumnConstraint(SchemaObject):
         return self.__details
 
 
-class TableConstraint(SchemaObject):
+class ColumnConstraint(Constraint):
     def __init__(self, order, comment, constraint_type, details, changes):
-        SchemaObject.__init__(self, constraint_type,
-                              order, comment, CONSTRAINT_TYPE, changes)
-        self.__constraint_type = _strip_keys(constraint_type)
-        details = details or {}
-        assert isinstance(details, dict)
-        self.__details = {}
-        for (k, v) in details.items():
-            self.__details[_strip_keys(k)] = v
+        Constraint.__init__(self, order, comment, constraint_type, details,
+                            changes)
 
-    @property
-    def constraint_type(self):
-        return self.__constraint_type
 
-    @property
-    def details(self):
-        """
-        A bit bucket of additional information about the constraint.
-        Eventually, this may be better defined.
-
-        :return: dict
-        """
-        return self.__details
+class TableConstraint(Constraint):
+    def __init__(self, order, comment, constraint_type, details, changes):
+        Constraint.__init__(self, order, comment, constraint_type, details,
+                            changes)
 
 
 class Column(SchemaObject):
@@ -247,7 +233,8 @@ class Table(SchemaObject):
 
 class View(SchemaObject):
     def __init__(self, order, comment, catalog_name, replace_if_exists,
-                 schema_name, view_name, select_query, columns, changes):
+                 schema_name, view_name, select_query, columns,
+                 table_constraints, changes):
         SchemaObject.__init__(self, view_name, order, comment, VIEW_TYPE,
                               changes)
         self.__catalog_name = catalog_name
@@ -255,6 +242,7 @@ class View(SchemaObject):
         self.__schema_name = schema_name
         self.__view_name = view_name
         self.__select_query = select_query
+        self.__table_constraints = table_constraints
         self.__columns = columns
 
     @property
@@ -280,6 +268,10 @@ class View(SchemaObject):
     @property
     def columns(self):
         return self.__columns
+
+    @property
+    def constraints(self):
+        return self.__table_constraints
 
     @property
     def sub_schema(self):
