@@ -689,7 +689,7 @@ if __name__ == '__main__':
 
     for schema in head.schema:
         if isinstance(schema, sqlmigration.model.Table):
-            print("Processing " + schema.name)
+            print("Table " + schema.name)
             generate_file(schema, processed_column_map[schema], False)
         elif isinstance(schema, sqlmigration.model.View):
             print("View " + schema.name)

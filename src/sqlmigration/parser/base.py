@@ -246,7 +246,12 @@ class SchemaParser(object):
             elif k == 'columns':
                 assert isinstance(v, tuple) or isinstance(v, list)
                 for col in v:
-                    columns.append(self._parse_column(col))
+                    for (kk, vv) in col.items():
+                        if kk == 'column':
+                            columns.append(self._parse_column(vv))
+                        else:
+                            self._error('"columns" must contain only '
+                                        '"column", but found ' + repr(kk))
             elif k == 'constraints':
                 if not (isinstance(v, tuple) or isinstance(v, list)):
                     self._error('"constraints" must be a list of "constraint", '

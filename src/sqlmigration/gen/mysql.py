@@ -2,7 +2,7 @@
 Base classes used for the generation of code based on the model objects.
 """
 
-from ..model import (ValueTypeValue)
+from ..model import (ValueTypeValue, View, Table)
 from .base import (SchemaScriptGenerator)
 import time
 
@@ -42,6 +42,7 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
         :param table: Table
         :return: list(str)
         """
+        assert isinstance(table, Table)
 
         # Note: do not use "IF NOT EXISTS", because that indicates upgrade.
         constraint_sql = ''
@@ -178,8 +179,8 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
                         raise Exception("column and table must be in foreign "
                                         "key; found in " + col.name + " in " +
                                         table.table_name)
-                    constraint_sql += '\n    , FOREIGN KEY ' + name + ' (' + \
-                                      _parse_name(col.name) + ') REFERENCES ' + \
+                    constraint_sql += '\n    , FOREIGN KEY ' + name + ' (' +\
+                                      _parse_name(col.name) + ') REFERENCES ' +\
                                       _parse_name(ct.details['table']) + ' ('
                     if 'column' in ct.details:
                         constraint_sql += _parse_name(ct.details['column'])
@@ -229,7 +230,13 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
         :param view:
         :return: list(str)
         """
-        raise Exception("not implemented")
+        assert isinstance(view, View)
+
+        sql = 'CREATE '
+        if view.replace_if_exists:
+            sql += 'OR REPLACE '
+        sql += 'VIEW ' + view.name + ' AS\n' + view.select_query + ';\n'
+        return [self._header(view), sql]
 
     def _generate_base_sequence(self, sequence):
         """
