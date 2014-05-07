@@ -206,8 +206,12 @@ def generate_read(schema_obj, processed_columns):
         title = '_x_'.join(col.replace('.', '__') for col in readby)
         arglist = [('$' + col.replace('.', '__')) for col in readby]
         args = ', '.join(arglist)
-        readbysql = sql + ' WHERE ' + (' AND '.join(
-            (col + ' = ?' for col in readby)))
+        readbysql = sql
+        if len(where_ands) > 0:
+            readbysql += ' AND '
+        else:
+            readbysql += ' WHERE '
+        readbysql += (' AND '.join((col + ' = ?' for col in readby)))
         ret.extend([
             '',
             '    public function countBy' + title + '($db, ' + args + ') {',
@@ -249,11 +253,17 @@ def generate_read(schema_obj, processed_columns):
     for fk in processed_columns.foreign_keys:
         assert isinstance(fk, ProcessedForeignKeyConstraint)
         if fk.is_owner:
+            readbysql = sql
+            if len(where_ands) > 0:
+                readbysql += ' AND '
+            else:
+                readbysql += ' WHERE '
+            readbysql += fk.column_name + ' = ?'
+
             ret.extend([
                 '',
                 '    public function countFor' + fk.php_name + '($db, $id) {',
-                '        $sql = \'' + sql.replace("'", "''") +
-                ' WHERE ' + fk.column_name + ' = ?\';',
+                '        $sql = \'' + readbysql.replace("'", "''") + '\';',
                 '        $stmt = $db->prepare($sql);',
                 '        $stmt->execute(array($id));',
                 '        if ($this->checkForErrors($db)) { return false; }',
@@ -261,8 +271,8 @@ def generate_read(schema_obj, processed_columns):
                 '    }', '', '',
                 '    public function readFor' + fk.php_name +
                 '($db, $id, $order = false, $start = -1, $end = -1) {',
-                '        $sql = \'' + sql.replace("'", "''") +
-                ' WHERE ' + fk.column_name + ' = ? ORDER BY \';',
+                '        $sql = \'' + readbysql.replace("'", "''") +
+                ' ORDER BY \';',
                 '        if (! $order) {',
                 '            $sql = \'' + processed_columns.
                 primary_key_column.name + '\';',
