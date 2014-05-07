@@ -12,6 +12,8 @@ namespace = None
 output_dir = None
 schema_by_name = {}
 
+platforms = ['mysql']
+
 
 def generate_file(schema_obj, processed_columns, read_only):
     assert (isinstance(schema_obj, sqlmigration.model.Table)
@@ -85,15 +87,30 @@ def generate_read(schema_obj, processed_columns):
             or isinstance(schema_obj, sqlmigration.model.View))
     assert isinstance(processed_columns, ProcessedColumnSet)
 
-    # FIXME this needs to know the foreign tables, so that it can properly
-    # separate (via alias) the foreign column names.
-
     join = ''
     fki = 0
     # include the foreign key here, for reference
     col_names = []
-    col_names.extend((schema_obj.name + '.' + col.name + ' AS ' + col.name)
-                     for col in schema_obj.columns)
+    where_ands = []
+
+    for column in schema_obj.columns:
+        handled = False
+        for constraint in processed_columns.values:
+            assert isinstance(constraint, SqlConstraint)
+            if (constraint.command == 'read' and
+                    constraint.column == column and
+                    constraint.value is not None):
+                handled = True
+                value = constraint.value
+                if constraint.argument:
+                    value = value.replace('{' + constraint.argument + '}',
+                                          ':' + constraint.argument)
+                col_names.append(column.name)
+                where_ands.append(value)
+        if not handled:
+            col_names.append(schema_obj.name + '.' + column.name + ' AS ' +
+                             column.name)
+
     for fk in processed_columns.foreign_keys:
         assert isinstance(fk, ProcessedForeignKeyConstraint)
         fki += 1
@@ -277,28 +294,34 @@ def generate_create(schema_obj, processed_columns):
             or isinstance(schema_obj, sqlmigration.model.View))
     assert isinstance(processed_columns, ProcessedColumnSet)
 
+    # TODO allow for updating the query to properly handle default values.
+    # For now, you'll need an "initial value" and custom sql.
+
     column_names = []
-    date_cols = []
-    date_vals = []
+    values = []
     for column in schema_obj.columns:
         if column != processed_columns.primary_key_column:
-            # Special handlers for the creation date.  This is specific
-            # to the WebRiffs standards
-            if column.name.lower() == 'created_on':
-                date_cols.append(column.name)
-                # MySql flavor
-                date_vals.append("NOW()")
-            elif column.name.lower() == 'last_updated_on':
-                date_cols.append(column.name)
-                date_vals.append("NULL")
-            else:
+            handled = False
+
+            for constraint in processed_columns.values:
+                assert isinstance(constraint, SqlConstraint)
+                if (constraint.command == 'create' and
+                        constraint.value is not None and
+                        constraint.column == column):
+                    handled = True
+                    column_names.append(column.name)
+                    value = constraint.value
+                    if constraint.argument is not None:
+                        value = value.replace('{' + constraint.argument + '}',
+                                              ':' + constraint.argument)
+                    print(column.name+" - create constraint: using value ["+value+"]")
+                    values.append(value)
+
+            if not handled:
                 column_names.append(column.name)
+                values.append(':' + column.name)
     cns = []
     cns.extend(column_names)
-    cns.extend(date_cols)
-    values = []
-    values.extend(':' + cn for cn in column_names)
-    values.extend(date_vals)
     sql = ('INSERT INTO ' + schema_obj.name + ' (' +
            (','.join(cns)) +
            ') VALUES (' + (','.join(values)) + ')')
@@ -332,16 +355,27 @@ def generate_update(schema_obj, processed_columns):
     column_name_values = {}
     for column in schema_obj.columns:
         if column != processed_columns.primary_key_column:
-            # Special handlers for the creation date.  This is specific
-            # to the WebRiffs standards
-            if column.name.lower() == 'created_on':
-                # Never update this column
-                pass
-            elif column.name.lower() == 'last_updated_on':
-                column_order.append(column.name)
-                column_name_values[column.name] = 'NOW()'
-                # MySql flavor
-            else:
+            handled = False
+            for constraint in processed_columns.values:
+                assert isinstance(constraint, SqlConstraint)
+                if (constraint.command == 'update' and
+                        constraint.column == column):
+                    if constraint.constant:
+                        # No update allowed
+                        handled = True
+                    elif constraint.value is not None:
+                        value = constraint.value
+                        if constraint.syntax != 'native':
+                            raise Exception(
+                                "value constraints can only be native")
+                        if constraint.argument is not None:
+                            value = value.replace(
+                                '{' + constraint.argument + '}',
+                                ':' + constraint.argument)
+                        handled = True
+                        column_order.append(column.name)
+                        column_name_values[column.name] = value
+            if not handled:
                 column_order.append(column.name)
                 column_name_values[column.name] = ':' + column.name
 
@@ -512,6 +546,25 @@ class ProcessedPhpValidationConstraint(AbstractProcessedConstraint):
         self.order_name += '_' + validation_type
 
 
+class SqlConstraint(AbstractProcessedConstraint):
+    def __init__(self, column, constraint, command):
+        AbstractProcessedConstraint.__init__(self, column, constraint)
+        assert command in ('create', 'update', 'read')
+        self.command = command
+        self.constant = constraint.constraint_type == 'noupdate'
+        self.syntax = None
+        if 'syntax' in constraint.details:
+            self.syntax = constraint.details['syntax']
+        self.argument = None
+        if 'argument' in constraint.details:
+            self.argument = constraint.details['argument']
+        self.value = None
+        if 'value' in constraint.details:
+            self.value = constraint.details['value']
+        self.user_value = self.constant or (
+            self.value is not None and self.argument is None)
+
+
 class ProcessedColumnSet(object):
     def __init__(self, schema_obj):
         object.__init__(self)
@@ -524,12 +577,26 @@ class ProcessedColumnSet(object):
         self.php_write = []
         self.php_validation = []
         self.table_reads = []
+        self.values = []
         for column in schema_obj.columns:
             assert isinstance(column, sqlmigration.model.Column)
 
             for constraint in column.constraints:
                 assert isinstance(constraint,
                                   sqlmigration.model.ColumnConstraint)
+
+                if 'platforms' in constraint.details:
+                    plats = [c.strip() for c in
+                             constraint.details['platforms'].split(',')]
+                    found = False
+                    for p in platforms:
+                        if p in plats:
+                            found = True
+                            break
+                    if not found:
+                        # Do not use this constraint if the platform doesn't
+                        # match.
+                        continue
 
                 if constraint.constraint_type == 'primarykey':
                     if self.primary_key_column is not None:
@@ -553,6 +620,16 @@ class ProcessedColumnSet(object):
                 elif constraint.constraint_type == 'phpwrite':
                     self.php_write.append(ProcessedPhpValidationConstraint(
                         column, constraint, 'write'))
+                elif constraint.constraint_type == 'initialvalue':
+                    self.values.append(
+                        SqlConstraint(column, constraint, 'create'))
+                elif (constraint.constraint_type == 'noupdate' or
+                      constraint.constraint_type == 'constantupdate'):
+                    self.values.append(
+                        SqlConstraint(column, constraint, 'update'))
+                elif constraint.constraint_type == 'constantquery':
+                    self.values.append(
+                        SqlConstraint(column, constraint, 'read'))
 
         for constraint in schema_obj.constraints:
             assert isinstance(constraint, sqlmigration.model.TableConstraint)
@@ -560,7 +637,7 @@ class ProcessedColumnSet(object):
             if constraint.constraint_type == 'read':
                 self.table_reads.append(
                     [col.strip() for col in
-                    constraint.details['columns'].split(',')])
+                        constraint.details['columns'].split(',')])
 
         if self.primary_key_column is None:
             raise Exception("No primary keys found")
