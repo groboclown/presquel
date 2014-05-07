@@ -316,7 +316,6 @@ def generate_create(schema_obj, processed_columns):
                     if constraint.argument is not None:
                         value = value.replace('{' + constraint.argument + '}',
                                               ':' + constraint.argument)
-                    print(column.name+" - create constraint: using value ["+value+"]")
                     values.append(value)
 
             if not handled:
