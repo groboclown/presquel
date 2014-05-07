@@ -127,6 +127,8 @@ def generate_read(schema_obj, processed_columns):
             col_names.append(fk_name + '.' + fk.fk_column_name + ' AS ' +
                              fk.fk_table_name + '__' + fk.fk_column_name)
     sql = 'SELECT ' + ','.join(col_names) + ' FROM ' + schema_obj.name + join
+    if len(where_ands) > 0:
+        sql += ' WHERE ' + (' AND '.join(where_ands))
 
     ret = [
         '',
