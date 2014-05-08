@@ -250,6 +250,8 @@ def generate_read(schema_obj, processed_columns):
             ''
         ])
 
+    # FIXME do this for ALL keys and indicies.  Also include table indicies that
+    # are multi-column.
     for fk in processed_columns.foreign_keys:
         assert isinstance(fk, ProcessedForeignKeyConstraint)
         if fk.is_owner:

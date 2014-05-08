@@ -16,6 +16,16 @@ class SchemaParser(object):
         self.__count = 0
         self.__source = None
 
+    def strip_changes(self, source, stream):
+        """
+        Strip out the "changes" tags.
+
+        :param source:
+        :param stream:
+        :return:
+        """
+        raise Exception("not implemented")
+
     def parse(self, source, stream):
         """
         Parses the input stream, and returns a list of top-level Change
@@ -355,6 +365,7 @@ class SchemaParser(object):
                 value_type = str(v).strip()
             elif k == 'value':
                 value = self._parse_value_type_value(v)
+            # FIXME make this a constraint, with "platform" support.
             elif k == 'default' or k == 'defaultvalue':
                 default_value = self._parse_value_type_value(v)
             elif k == 'remarks':
