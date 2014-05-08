@@ -12,6 +12,10 @@ class SchemaVersion(object):
     """
     def __init__(self, version, top_changes, schema):
         object.__init__(self)
+
+        # FIXME when the dewey decimal versions are added, the "version" will
+        # need to be tweaked to allow different types
+
         if not isinstance(version, int):
             raise Exception('"version" must be int, found ' + repr(version))
         self.__version = version

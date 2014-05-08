@@ -88,16 +88,16 @@ class ValueTypeValue(object):
 
 
 class Constraint(SchemaObject):
-    def __init__(self, order, comment, constraint_type, details, changes):
+    def __init__(self, order, comment, constraint_type, column_names, details,
+                 changes):
         SchemaObject.__init__(self, constraint_type, order, comment,
                               CONSTRAINT_TYPE, changes)
         assert isinstance(constraint_type, str)
         self.__constraint_type = _strip_keys(constraint_type)
         details = details or {}
         assert isinstance(details, dict)
-        self.__details = {}
-        for (k, v) in details.items():
-            self.__details[_strip_keys(k)] = v
+        self.__details = details
+        self.__column_names = tuple(column_names or [])
 
     @property
     def constraint_type(self):
@@ -113,17 +113,79 @@ class Constraint(SchemaObject):
         """
         return self.__details
 
+    @property
+    def column_names(self):
+        return self.__column_names
 
-class ColumnConstraint(Constraint):
-    def __init__(self, order, comment, constraint_type, details, changes):
-        Constraint.__init__(self, order, comment, constraint_type, details,
-                            changes)
+    def get_columns_by_names(self, parent_schema):
+        """
+
+        :return: list of columns in the parent_schema that match the
+            column_names.  The column_names order will be maintained.
+        """
+        assert (isinstance(parent_schema, Table) or
+                isinstance(parent_schema, View))
+        ret = []
+        for cn in self.column_names:
+            for col in parent_schema.columns:
+                if col.name == cn:
+                    ret.append(col)
+        return ret
 
 
-class TableConstraint(Constraint):
-    def __init__(self, order, comment, constraint_type, details, changes):
-        Constraint.__init__(self, order, comment, constraint_type, details,
-                            changes)
+class SqlConstraint(Constraint):
+    def __init__(self, order, comment, constraint_type, column_names, details,
+                 sql_set, arguments, changes):
+        Constraint.__init__(self, order, comment, constraint_type, column_names,
+                            details, changes)
+        assert isinstance(SqlSet, sql_set)
+        self.__sql_set = sql_set
+        self.__arguments = arguments or []
+
+    @property
+    def sql(self):
+        return self.__sql_set
+
+    @property
+    def arguments(self):
+        return self.__arguments
+
+
+class LanguageConstraint(Constraint):
+    def __init__(self, order, comment, constraint_type, column_names, details,
+                 language, code, arguments, changes):
+        Constraint.__init__(self, order, comment, constraint_type, column_names,
+                            details, changes)
+        assert isinstance(language, str)
+        assert isinstance(code, str)
+        self.__language = language
+        self.__code = code
+        self.__arguments = arguments or []
+
+    @property
+    def language(self):
+        return self.__language
+
+    @property
+    def code(self):
+        return self.__code
+
+    @property
+    def arguments(self):
+        return self.__arguments
+
+
+class NamedConstraint(Constraint):
+    def __init__(self, order, comment, constraint_type, column_names, details,
+                 name, changes):
+        Constraint.__init__(self, order, comment, constraint_type, column_names,
+                            details, changes)
+        assert isinstance(name, str)
+        self.__name = name
+
+    @property
+    def name(self):
+        return self.__name
 
 
 class Column(SchemaObject):

@@ -96,6 +96,7 @@ class BaseObject(object):
         assert isinstance(change, BaseObject)
         return self.order >= change.order
 
+
 class SchemaObjectType(object):
     """
     Describes the kind of schema object.  Should be considered an enum.
@@ -118,7 +119,7 @@ class SqlString(object):
                 and len(platforms) > 0)
         self.__sql = sql
         self.__syntax = syntax.strip().lower()
-        self.__platforms = [_strip_keys(p) for p in platforms]
+        self.__platforms = [p.strip().lower() for p in platforms]
 
     # TODO allow for priorities on the platform
 
@@ -158,7 +159,7 @@ class SqlSet(object):
             platforms = [platforms]
 
         for p in platforms:
-            p = _strip_keys(p)
+            p = p.strip().lower()
             for sql in self.__sql_set:
                 assert isinstance(sql, SqlString)
                 for sp in sql.platforms:
@@ -185,9 +186,3 @@ PROCEDURE_TYPE = SchemaObjectType('procedure')
 SCHEMA_OBJECT_TYPES = (COLUMN_TYPE, CONSTRAINT_TYPE, LOOKUP_TABLE_TYPE,
                        PRIMARY_KEY_TYPE, SEQUENCE_TYPE, INDEX_TYPE, TABLE_TYPE,
                        VIEW_TYPE)
-
-
-def _strip_keys(key):
-    for c in ' \r\n\t_-':
-        key = key.replace(c, '')
-    return key.lower()

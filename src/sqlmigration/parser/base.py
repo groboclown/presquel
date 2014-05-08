@@ -3,8 +3,9 @@ from ..model import (SCHEMA_OBJECT_TYPES, CHANGE_TYPES,
                      SQL_CHANGE, SqlChange, Change,
                      TABLE_TYPE, Table,
                      VIEW_TYPE, View, CONSTRAINT_TYPE, COLUMN_TYPE,
-                     Column, ColumnConstraint, TableConstraint, ValueTypeValue,
-                     SqlString, SqlSet)
+                     Column, SqlConstraint, LanguageConstraint, Constraint,
+                     NamedConstraint,
+                     ValueTypeValue, SqlString, SqlSet)
 
 
 class BaseObjectBuilder(object):
@@ -66,8 +67,11 @@ class NameSpaceObjectBuilder(BaseObjectBuilder):
             self.table_space = str(v).strip()
         elif k == 'constraints':
             for ch in self._parser.fetch_dicts_from_list(k, v, 'constraint'):
-                self.constraints.append(
-                    self._parser.parse_constraint(ch, self.__is_readonly))
+                # FIXME this could be bad - name may not be parsed yet
+                if self.name is None:
+                    print("** WARNING: parsing constraint before name is known")
+                self.constraints.append(self._parser.parse_constraint(
+                    self.name, ch))
         else:
             return False
         return True
@@ -106,7 +110,8 @@ class SqlStatementBuilder(object):
             elif k == 'sql' or k == 'query':
                 assert isinstance(v, str)
                 self.sql = v
-        if self.sql is None or len(self.sql) <= 0 or not isinstance(self.sql, str):
+        if (self.sql is None or len(self.sql) <= 0 or
+                not isinstance(self.sql, str)):
             raise Exception("expected 'sql' item (found " + repr(self.sql) +
                             ")")
         return SqlString(self.sql, self.syntax, self.platforms)
@@ -428,7 +433,7 @@ class SchemaParser(object):
                 assert position >= 0
             elif k == 'constraints':
                 for ch in self.fetch_dicts_from_list(k, v, 'constraint'):
-                    constraints.append(self.parse_constraint(ch, True))
+                    constraints.append(self.parse_constraint(name, ch))
             else:
                 self.error("unknown key (" + k + ") set to " + repr(v))
 
@@ -439,13 +444,19 @@ class SchemaParser(object):
                       before_column, after_column, position, constraints,
                       changes)
 
-    def parse_constraint(self, d, is_column):
+    def parse_constraint(self, parent_column, d):
         assert isinstance(d, dict)
 
         cons_obj = BaseObjectBuilder(self)
         constraint_type = None
         changes = []
+        sql_set = None
+        language = None
+        code = None
+        name = None
+        column_names = []
         details = {}
+        arguments = []
 
         for (k, v) in d.items():
             k = _strip_key(k)
@@ -458,21 +469,93 @@ class SchemaParser(object):
                 for ch in self.fetch_dicts_from_list(k, v, 'change'):
                     changes.append(self.parse_inner_change(
                         ch, CONSTRAINT_TYPE))
+            elif k == 'columns':
+                if isinstance(v, str):
+                    column_names.extend([c.strip() for c in v.split(',')])
+                elif isinstance(v, list) or isinstance(v, tuple):
+                    d_list = []
+                    for c in v:
+                        if isinstance(c, str):
+                            column_names.append([c.strip()])
+                        elif isinstance(c, dict):
+                            d_list.append(c)
+                        else:
+                            raise Exception("columns can be a string, or "
+                                            "contain a list of strings or "
+                                            "dictionaries")
+                    for c in self.fetch_dicts_from_list(k, d_list, 'column'):
+                        column_names.append(c.strip())
             elif k == 'type':
                 constraint_type = str(v).strip()
+            elif k == 'dialects':
+                ss = []
+                for ch in self.fetch_dicts_from_list(k, v, 'dialect'):
+                    sql = SqlStatementBuilder()
+                    ss.append(sql.make(ch))
+                sql_set = SqlSet(ss)
+            elif k == 'sql':
+                ch = {
+                    'syntax': 'universal',
+                    'platforms': 'all',
+                    'sql': v
+                }
+                sql = SqlStatementBuilder()
+                sql_set = SqlSet([sql.make(ch)])
+            elif k == 'language':
+                language = v.strip().lower()
+            elif k == 'code':
+                code = v
+            elif k == 'name':
+                name = v.strip()
+            elif k == 'argument':
+                arguments.append(v.strip())
+            elif k == 'arguments':
+                if isinstance(v, str):
+                    arguments.append([a.strip() for a in v.split(',')])
+                else:
+                    d_list = []
+                    for c in v:
+                        if isinstance(c, str):
+                            arguments.append([c.strip()])
+                        elif isinstance(c, dict):
+                            d_list.append(c)
+                        else:
+                            raise Exception("arguments can be a string, or "
+                                            "contain a list of strings or "
+                                            "dictionaries")
+                    for c in self.fetch_dicts_from_list(k, d_list, 'argument'):
+                        arguments.append(c.strip())
             else:
                 # Custom constraint key/values
                 details[k] = v
 
+        if len(column_names) <= 0 and parent_column is not None:
+            column_names = [parent_column]
+
         assert constraint_type is not None and len(constraint_type) > 0
-        if is_column:
-            return ColumnConstraint(
-                cons_obj.order, cons_obj.comment, constraint_type, details,
-                changes)
-        else:
-            return TableConstraint(
-                cons_obj.order, cons_obj.comment, constraint_type, details,
-                changes)
+        if sql_set is not None:
+            assert language is None
+            assert code is None
+            if name is not None:
+                details['name'] = name
+            return SqlConstraint(cons_obj.order, cons_obj.comment,
+                                 constraint_type, column_names, details,
+                                 sql_set, arguments, changes)
+
+        if language is not None and code is not None:
+            if name is not None:
+                details['name'] = name
+            return LanguageConstraint(cons_obj.order, cons_obj.comment,
+                                      constraint_type, column_names, details,
+                                      language, code, arguments, changes)
+
+        if name is not None:
+            return NamedConstraint(cons_obj.order, cons_obj.comment,
+                                   constraint_type, column_names, details, name,
+                                   changes)
+
+        return Constraint(cons_obj.order, cons_obj.comment, constraint_type,
+                          column_names, details, changes)
 
     def error(self, message):
         raise Exception(str(self.__current_source) + ': ' + str(message))
