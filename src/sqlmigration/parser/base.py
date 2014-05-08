@@ -3,7 +3,113 @@ from ..model import (SCHEMA_OBJECT_TYPES, CHANGE_TYPES,
                      SQL_CHANGE, SqlChange, Change,
                      TABLE_TYPE, Table,
                      VIEW_TYPE, View, CONSTRAINT_TYPE, COLUMN_TYPE,
-                     Column, ColumnConstraint, TableConstraint, ValueTypeValue)
+                     Column, ColumnConstraint, TableConstraint, ValueTypeValue,
+                     SqlString, SqlSet)
+
+
+class BaseObjectBuilder(object):
+    def __init__(self, parser):
+        assert isinstance(parser, SchemaParser)
+        object.__init__(self)
+        self._parser = parser
+        self.order = parser.next_order()
+        self.comment = None
+
+    def parse(self, k, v):
+        if k == 'error':
+            self._parser.error('explicit error "' + str(v) + '"')
+        elif k == 'warning':
+            print("**WARNING** (" + str(self._parser.source) + ")", str(v))
+        elif k == 'note':
+            print("Note (" + str(self._parser.source) + ")", str(v))
+        elif k == 'comment':
+            self.comment = v.strip()
+        elif k == 'order':
+            self.order = self._parser.next_explicit_order(int(v))
+        else:
+            return False
+        return True
+
+    def _fail_on(self, k, v):
+        self._parser.error('unknown key (' + str(k) + ') set to ' + repr(v))
+
+
+class NameSpaceObjectBuilder(BaseObjectBuilder):
+    def __init__(self, parser, name_keys, change_type, is_readonly):
+        BaseObjectBuilder.__init__(self, parser)
+        self.catalog_name = None
+        self.schema_name = None
+        self.name = None
+        self.table_space = None
+        self.constraints = []
+        self.changes = []
+        self.__name_keys = name_keys
+        self.__change_type = change_type
+        self.__is_readonly = is_readonly
+
+    def parse(self, k, v):
+        if BaseObjectBuilder.parse(self, k, v):
+            return True
+        if k == 'change':
+            self.changes.append(self._parser.parse_inner_change(v, TABLE_TYPE))
+        elif k == 'changes':
+            for ch in self._parser.fetch_dicts_from_list(k, v, 'change'):
+                self.changes.append(self._parser.parse_inner_change(
+                    ch, self.__change_type))
+        elif k == 'catalog' or k == 'catalogname':
+            self.catalog_name = str(v).strip()
+        elif k == 'schema' or k == 'schemaname':
+            self.schema_name = str(v).strip()
+        elif k == 'name' or k in self.__name_keys:
+            self.name = str(v).strip()
+        elif k == 'space' or k == 'tablespace':
+            self.table_space = str(v).strip()
+        elif k == 'constraints':
+            for ch in self._parser.fetch_dicts_from_list(k, v, 'constraint'):
+                self.constraints.append(
+                    self._parser.parse_constraint(ch, self.__is_readonly))
+        else:
+            return False
+        return True
+
+
+class SqlStatementBuilder(object):
+    def __init__(self):
+        object.__init__(self)
+        self.syntax = 'native'
+        self.platforms = []
+        self.sql = None
+
+    def set_platforms(self, platforms):
+        if isinstance(platforms, str):
+            self.platforms.extend([
+                s.strip() for s in platforms.split(',')
+            ])
+        else:
+            self.platforms.extend([
+                p.strip() for p in platforms
+            ])
+
+    def make(self, d):
+        """
+        :param d: dict
+        :return: SqlString
+        """
+        assert isinstance(d, dict)
+
+        for (k, v) in d.items():
+            k = _strip_key(k)
+            if k == 'syntax':
+                self.syntax = v.strip().lower()
+            elif k == 'platforms':
+                self.set_platforms(v)
+            elif k == 'sql' or k == 'query':
+                assert isinstance(v, str)
+                self.sql = v
+        if self.sql is None or len(self.sql) <= 0 or not isinstance(self.sql, str):
+            raise Exception("expected 'sql' item (found " + repr(self.sql) +
+                            ")")
+        return SqlString(self.sql, self.syntax, self.platforms)
 
 
 class SchemaParser(object):
@@ -13,8 +119,8 @@ class SchemaParser(object):
 
     def __init__(self):
         object.__init__(self)
-        self.__count = 0
-        self.__source = None
+        self.__current_source = None
+        self.__source_order = {}
 
     def strip_changes(self, source, stream):
         """
@@ -36,251 +142,197 @@ class SchemaParser(object):
         """
         raise Exception("not implemented")
 
+    @property
+    def source(self):
+        return self.__current_source
+
+    def next_order(self, source=None):
+        if source is None:
+            source = self.__current_source
+        assert source is not None
+        if source not in self.__source_order:
+            self.__source_order[source] = [len(self.__source_order), [-1]]
+        self.__source_order[source][1][-1] += 1
+        ret = [
+            self.__source_order[source][0],
+            len(self.__source_order[source][1]) - 1,
+            self.__source_order[source][1][-1]
+        ]
+        return ret
+
+    def next_explicit_order(self, order, source=None):
+        assert isinstance(order, int)
+        if source is None:
+            source = self.__current_source
+        assert source is not None
+        if source not in self.__source_order:
+            self.__source_order[source] = [len(self.__source_order), [-1]]
+        # make sure we have 1 more entry after the requested order.
+        while len(self.__source_order[source][1] <= order):
+            self.__source_order[source][1].append(-1)
+        self.__source_order[source][order] += 1
+        ret = []
+        ret.extend(self.__source_order[source])
+        return ret
+
     def _parse_dict(self, source, d):
         """
         Takes a dictionary of values, similar to a JSon object, and returns
-        the parsed schema values.
+        the parsed schema values.  Used only for the top-level dictionary.
 
         :param d: dictionary with string keys, and values of lists, strings,
             numerics, nulls, or dictionaries.
         :return:
         """
-        self.__source = source
-        if not isinstance(d, dict):
-            self._error("top level must be a dictionary")
-        ret = []
+        self.__current_source = source
+        try:
+            if not isinstance(d, dict):
+                self.error("top level must be a dictionary")
+            ret = []
 
-        for (k, v) in d.items():
-            k = _strip_key(k)
-            if k == 'changes':
-                if not (isinstance(v, tuple) or isinstance(v, list)):
-                    self._error("changes does not contain a list, but " +
-                                repr(v))
-                for ch in v:
-                    for (kk, vv) in v.items():
-                        kk = _strip_key(kk)
-                        if kk == 'change':
-                            ret.append(self._parse_top_change(ch))
-                        else:
-                            self._error('"changes" can only contain "change')
-            elif k == 'change':
-                ret.append(self._parse_top_change(v))
-            elif k == 'table':
-                ret.append(self._parse_table(v))
-            elif k == 'view':
-                ret.append(self._parse_view(v))
-            elif k == 'procedure':
-                ret.append(self._parse_procedure(v))
-            elif k == 'sequence':
-                ret.append(self._parse_sequence(v))
-            else:
-                self._parse_common_keyval(k, v)
+            for (k, v) in d.items():
+                k = _strip_key(k)
+                if k == 'changes':
+                    for ch in self.fetch_dicts_from_list(k, v, 'change'):
+                        ret.append(self._parse_top_change(ch))
+                elif k == 'change':
+                    ret.append(self._parse_top_change(v))
+                elif k == 'tables':
+                    for ch in self.fetch_dicts_from_list(k, v, 'table'):
+                        ret.append(self._parse_table(ch))
+                elif k == 'table':
+                    ret.append(self._parse_table(v))
+                elif k == 'views':
+                    for ch in self.fetch_dicts_from_list(k, v, 'view'):
+                        ret.append(self._parse_view(ch))
+                elif k == 'view':
+                    ret.append(self._parse_view(v))
+                elif k == 'procedures':
+                    for ch in self.fetch_dicts_from_list(k, v, 'procedure'):
+                        ret.append(self._parse_procedure(ch))
+                elif k == 'procedure':
+                    ret.append(self._parse_procedure(v))
+                elif k == 'sequences':
+                    for ch in self.fetch_dicts_from_list(k, v, 'sequence'):
+                        ret.append(self._parse_sequence(ch))
+                elif k == 'sequence':
+                    ret.append(self._parse_sequence(v))
+                else:
+                    self.error("unknown key (" + k + ") set to " + repr(v))
+        finally:
+            self.__current_source = None
         return ret
 
     def _parse_top_change(self, d):
         if not isinstance(d, dict):
-            self._error("top change value is not a dictionary")
+            self.error("top change value is not a dictionary")
 
-        comment = None
-        order = self.__count
-        self.__count += 1
+        change_obj = BaseObjectBuilder(self)
+        sql_set = []
         schema_type = None
         change_type = SQL_CHANGE
-        sql = None
-        platforms = []
 
         for (k, v) in d.items():
             k = _strip_key(k)
-            if k == 'comment':
-                if not isinstance(v, str):
-                    self._error('"comment" can only be a string')
-                comment = v
-            elif k == 'order':
-                order = int(v)
-            elif k == 'schema' or k == 'schema':
+            if change_obj.parse(k, v):
+                # handled implicitly
+                pass
+            elif k == 'schema' or k == 'schematype':
                 schema_type = _parse_schema_type(v)
             elif k == 'change' or k == 'changetype':
                 change_type = _parse_change_type(v)
-            elif k == 'sql':
-                if not isinstance(v, str):
-                    self._error('"sql" can only be a string')
-                sql = v
-            elif k == 'platform':
-                platforms.append(str(v).strip())
-            elif k == 'platforms':
-                if not (isinstance(v, tuple) or isinstance(v, list)):
-                    self._error('"platforms" can only contain a list')
-                for p in v:
-                    if isinstance(p, str):
-                        platforms.append(p.strip())
-                    else:
-                        for (kk, vv) in p.items():
-                            kk = _strip_key(kk)
-                            if kk == 'platform':
-                                platforms.append(str(vv).strip())
-                            else:
-                                self._error('"platforms" can only contain '
-                                            '"platform" or a list of strings')
+            elif k == 'dialects':
+                for ch in self.fetch_dicts_from_list(
+                        k, v, ['dialect']):
+                    sql = SqlStatementBuilder()
+                    sql_set.append(sql.make(ch))
+            elif k in ['statement', 'sql', 'query', 'execute']:
+                ch = {
+                    'syntax': 'universal',
+                    'platforms': 'all',
+                    'sql': v
+                }
+                sql = SqlStatementBuilder()
+                sql_set.append(sql.make(ch))
             else:
-                self._parse_common_keyval(k, v)
+                self.error("unknown key (" + k + ") set to " + repr(v))
 
-        if schema_type is None:
-            self._error("did not specify schema type for change")
         if change_type != SQL_CHANGE:
-            self._error("only sql changes supported at top-level")
-        if sql is None or len(sql) <= 0:
-            self._error("requires 'sql' for sql change")
-        return SqlChange(order, comment, schema_type, platforms, sql)
+            self.error("only sql changes supported at top-level")
+        if schema_type is None:
+            self.error("did not specify schema type for change")
+
+        return SqlChange(change_obj.order, change_obj.comment, schema_type,
+                         SqlSet(sql_set))
 
     def _parse_table(self, d):
         if not isinstance(d, dict):
-            self._error('"table" must be a dictionary')
+            self.error('"table" must be a dictionary')
 
-        comment = None
-        order = self.__count
-        self.__count += 1
-        catalog_name = None
-        schema_name = None
-        table_name = None
-        table_space = None
+        table_obj = NameSpaceObjectBuilder(self, ['tablename'], TABLE_TYPE,
+                                           False)
         columns = []
-        constraints = []
-        changes = []
 
         for (k, v) in d.items():
             k = _strip_key(k)
-            if k == 'comment':
-                assert isinstance(v, str)
-                comment = v
-            elif k == 'order':
-                order = int(v)
-            elif k == 'change':
-                changes.append(self._parse_inner_change(v, TABLE_TYPE))
-            elif k == 'changes':
-                assert isinstance(v, tuple) or isinstance(v, list)
-                for ch in v:
-                    for (kk, vv) in ch.items():
-                        kk = _strip_key(kk)
-                        if kk == 'change':
-                            changes.append(self._parse_inner_change(
-                                vv, TABLE_TYPE))
-                        else:
-                            self._error('only "change" is allowed inside '
-                                        '"changes"')
-            elif k == 'catalog' or k == 'catalogname':
-                catalog_name = str(v).strip()
-            elif k == 'schema' or k == 'schemaname':
-                schema_name = str(v).strip()
-            elif k == 'name' or k == 'tablename':
-                table_name = str(v).strip()
-            elif k == 'space' or k == 'tablespace':
-                table_space = str(v).strip()
+            if table_obj.parse(k, v):
+                # handled by parse
+                pass
             elif k == 'column':
                 columns.append(self._parse_column(v))
             elif k == 'columns':
-                assert isinstance(v, tuple) or isinstance(v, list)
-                for col in v:
-                    for (kk, vv) in col.items():
-                        kk = _strip_key(kk)
-                        if kk == 'column':
-                            columns.append(self._parse_column(vv))
-                        else:
-                            self._error('only "column" is allowed inside '
-                                        '"columns"')
-            elif k == 'constraints':
-                if not (isinstance(v, tuple) or isinstance(v, list)):
-                    self._error('"constraints" must be a list of "constraint", '
-                                'but found ' + repr(v))
-                for con in v:
-                    for (kk, vv) in con.items():
-                        if kk == 'constraint':
-                            constraints.append(
-                                self._parse_constraint(vv, False))
-                        else:
-                            self._error('"constraints" must contain only'
-                                        ' "constraint", but found ' + repr(kk))
+                for ch in self.fetch_dicts_from_list(k, v, 'column'):
+                    columns.append(self._parse_column(ch))
             else:
-                self._parse_common_keyval(k, v)
+                self.error("unknown key (" + k + ") set to " + repr(v))
 
-        assert table_name is not None and len(table_name) > 0
-        return Table(order, comment, catalog_name, schema_name, table_name,
-                     table_space, columns, constraints, changes)
+        assert table_obj.name is not None and len(table_obj.name) > 0
+        return Table(table_obj.order, table_obj.comment,
+                     table_obj.catalog_name, table_obj.schema_name,
+                     table_obj.name, table_obj.table_space, columns,
+                     table_obj.constraints, table_obj.changes)
 
     def _parse_view(self, d):
         assert isinstance(d, dict)
 
-        comment = None
-        order = self.__count
-        self.__count += 1
-        catalog_name = None
+        view_obj = NameSpaceObjectBuilder(self, ['viewname'], VIEW_TYPE, True)
         replace_if_exists = True
-        schema_name = None
-        view_name = None
-        select_query = None
+        sql_set = []
         columns = []
-        constraints = []
-        changes = []
 
         for (k, v) in d.items():
             k = _strip_key(k)
-            if k == 'comment':
-                assert isinstance(v, str)
-                comment = v
-            elif k == 'order':
-                order = int(v)
-            elif k == 'change':
-                changes.append(self._parse_inner_change(v, VIEW_TYPE))
-            elif k == 'changes':
-                assert isinstance(v, tuple) or isinstance(v, list)
-                for ch in v:
-                    for (kk, vv) in ch.items():
-                        kk = _strip_key(kk)
-                        if kk == 'change':
-                            changes.append(self._parse_inner_change(
-                                vv, VIEW_TYPE))
-                        else:
-                            self._error('only "change" is allowed inside '
-                                        '"changes"')
-            elif k == 'catalog' or k == 'catalogname':
-                catalog_name = str(v).strip()
-            elif k == 'schema' or k == 'schemaname':
-                schema_name = str(v).strip()
-            elif k == 'name' or k == 'viewname':
-                view_name = str(v).strip()
+            if view_obj.parse(k, v):
+                # handled by parse
+                pass
             elif k == 'replace' or k == 'replaceifexists':
                 replace_if_exists = _parse_boolean(v)
-            elif k == 'query' or k == 'select' or k == 'sql':
-                select_query = str(v)
+            elif k == 'dialects':
+                for ch in self.fetch_dicts_from_list(
+                        k, v, ['dialect']):
+                    sql = SqlStatementBuilder()
+                    sql_set.append(sql.make(ch))
+            elif k in ['statement', 'sql', 'query', 'execute']:
+                ch = {
+                    'syntax': 'universal',
+                    'platforms': 'all',
+                    'sql': v
+                }
+                sql = SqlStatementBuilder()
+                sql_set.append(sql.make(ch))
             elif k == 'column':
                 columns.append(self._parse_column(v))
             elif k == 'columns':
-                assert isinstance(v, tuple) or isinstance(v, list)
-                for col in v:
-                    for (kk, vv) in col.items():
-                        if kk == 'column':
-                            columns.append(self._parse_column(vv))
-                        else:
-                            self._error('"columns" must contain only '
-                                        '"column", but found ' + repr(kk))
-            elif k == 'constraints':
-                if not (isinstance(v, tuple) or isinstance(v, list)):
-                    self._error('"constraints" must be a list of "constraint", '
-                                'but found ' + repr(v))
-                for con in v:
-                    for (kk, vv) in con.items():
-                        if kk == 'constraint':
-                            constraints.append(
-                                self._parse_constraint(vv, False))
-                        else:
-                            self._error('"constraints" must contain only'
-                                        ' "constraint", but found ' + repr(kk))
+                for ch in self.fetch_dicts_from_list(k, v, 'column'):
+                    columns.append(self._parse_column(ch))
             else:
-                self._parse_common_keyval(k, v)
+                self.error("unknown key (" + k + ") set to " + repr(v))
 
-        assert select_query is not None and len(select_query) > 0
-        return View(order, comment, catalog_name, replace_if_exists,
-                    schema_name, view_name, select_query, columns, constraints,
-                    changes)
+        assert len(sql_set) > 0
+        return View(view_obj.order, view_obj.comment, view_obj.catalog_name,
+                    replace_if_exists, view_obj.schema_name, view_obj.name,
+                    SqlSet(sql_set), columns, view_obj.constraints,
+                    view_obj.changes)
 
     def _parse_procedure(self, d):
         raise Exception("not implemented")
@@ -288,52 +340,51 @@ class SchemaParser(object):
     def _parse_sequence(self, d):
         raise Exception("not implemented")
 
-    def _parse_inner_change(self, d, schema_type):
+    def parse_inner_change(self, d, schema_type):
         assert isinstance(d, dict)
 
-        comment = None
-        order = self.__count
-        self.__count += 1
+        change_obj = BaseObjectBuilder(self)
+        sql_set = []
         change_type = SQL_CHANGE
-        sql = None
-        platforms = []
 
         for (k, v) in d.items():
             k = _strip_key(k)
-            if k == 'comment':
-                assert isinstance(v, str)
-                comment = v
-            elif k == 'order':
-                order = int(v)
+            if change_obj.parse(k, v):
+                # handled
+                pass
             elif k == 'schema' or k == 'schematype':
                 schema_type = _parse_schema_type(v)
-            elif k == 'change' or k == 'changetype':
+            elif k == 'change' or k == 'changetype' or k == 'type':
                 change_type = _parse_change_type(v)
-            elif k == 'sql':
-                assert isinstance(v, str)
-                sql = v
-            elif k == 'platform':
-                platforms.append(str(v).strip())
-            elif k == 'platforms':
-                assert isinstance(v, tuple) or isinstance(v, list)
-                for p in v:
-                    platforms.append(p.strip())
+            elif k == 'dialects':
+                for ch in self.fetch_dicts_from_list(
+                        k, v, ['dialect']):
+                    sql = SqlStatementBuilder()
+                    sql_set.append(sql.make(ch))
+            elif k in ['statement', 'sql', 'query', 'execute']:
+                ch = {
+                    'syntax': 'universal',
+                    'platforms': 'all',
+                    'sql': v
+                }
+                sql = SqlStatementBuilder()
+                sql_set.append(sql.make(ch))
             else:
-                self._parse_common_keyval(k, v)
+                self.error("unknown key (" + k + ") set to " + repr(v))
 
         if change_type == SQL_CHANGE:
-            if sql is None or len(sql) <= 0:
-                return self._error("requires 'sql' for sql change")
-            return SqlChange(order, comment, schema_type, sql, platforms)
+            if len(sql_set) <= 0:
+                return self.error("requires 'sql' or 'dialects' for sql change")
+            return SqlChange(change_obj.order, change_obj.comment, schema_type,
+                             SqlSet(sql_set))
         else:
-            return Change(order, comment, schema_type, change_type)
+            return Change(change_obj.order, change_obj.comment, schema_type,
+                          change_type)
 
     def _parse_column(self, d):
         assert isinstance(d, dict)
 
-        comment = None
-        order = self.__count
-        self.__count += 1
+        column_obj = BaseObjectBuilder(self)
         name = None
         value_type = None
         value = None
@@ -348,24 +399,20 @@ class SchemaParser(object):
 
         for (k, v) in d.items():
             k = _strip_key(k)
-            if k == 'comment':
-                assert isinstance(v, str)
-                comment = v
-            elif k == 'order':
-                order = int(v)
+            if column_obj.parse(k, v):
+                # Handled
+                pass
             elif k == 'change':
-                changes.append(self._parse_inner_change(v, COLUMN_TYPE))
+                changes.append(self.parse_inner_change(v, COLUMN_TYPE))
             elif k == 'changes':
-                assert isinstance(v, tuple) or isinstance(v, list)
-                for ch in v:
-                    changes.append(self._parse_inner_change(ch, COLUMN_TYPE))
+                for ch in self.fetch_dicts_from_list(k, v, 'change'):
+                    changes.append(self.parse_inner_change(ch, COLUMN_TYPE))
             elif k == 'name':
                 name = str(v).strip()
             elif k == 'type':
                 value_type = str(v).strip()
             elif k == 'value':
                 value = self._parse_value_type_value(v)
-            # FIXME make this a constraint, with "platform" support.
             elif k == 'default' or k == 'defaultvalue':
                 default_value = self._parse_value_type_value(v)
             elif k == 'remarks':
@@ -380,144 +427,92 @@ class SchemaParser(object):
                 position = int(v)
                 assert position >= 0
             elif k == 'constraints':
-                if not (isinstance(v, tuple) or isinstance(v, list)):
-                    self._error('"constraints" must be a list of "constraint", '
-                                'but found '+repr(v))
-                for con in v:
-                    for (kk, vv) in con.items():
-                        if kk == 'constraint':
-                            constraints.append(
-                                self._parse_constraint(vv, True))
-                        else:
-                            self._error('"constraints" must contain only'
-                                        ' "constraint", but found ' + repr(kk))
+                for ch in self.fetch_dicts_from_list(k, v, 'constraint'):
+                    constraints.append(self.parse_constraint(ch, True))
             else:
-                self._parse_common_keyval(k, v)
+                self.error("unknown key (" + k + ") set to " + repr(v))
 
         assert name is not None and len(name) > 0
         assert value_type is not None and len(value_type) > 0
-        return Column(order, comment, name, value_type, value, default_value,
-                      auto_increment, remarks, before_column, after_column,
-                      position, constraints, changes)
+        return Column(column_obj.order, column_obj.comment, name, value_type,
+                      value, default_value, auto_increment, remarks,
+                      before_column, after_column, position, constraints,
+                      changes)
 
-    def _parse_constraint(self, d, is_column):
+    def parse_constraint(self, d, is_column):
         assert isinstance(d, dict)
 
-        comment = None
-        order = self.__count
-        self.__count += 1
+        cons_obj = BaseObjectBuilder(self)
         constraint_type = None
         changes = []
         details = {}
 
         for (k, v) in d.items():
             k = _strip_key(k)
-            if k == 'comment':
-                assert isinstance(v, str)
-                comment = v
-            elif k == 'order':
-                order = int(v)
+            if cons_obj.parse(k, v):
+                # Handled
+                pass
             elif k == 'change':
-                changes.append(self._parse_inner_change(v, CONSTRAINT_TYPE))
+                changes.append(self.parse_inner_change(v, CONSTRAINT_TYPE))
             elif k == 'changes':
-                assert isinstance(v, tuple) or isinstance(v, list)
-                for ch in v:
-                    for (kk, vv) in ch.items():
-                        kk = _strip_key(kk)
-                        if kk == 'change':
-                            changes.append(self._parse_inner_change(
-                                vv, CONSTRAINT_TYPE))
-                        else:
-                            self._error('only "change" is allowed inside '
-                                        '"changes"')
+                for ch in self.fetch_dicts_from_list(k, v, 'change'):
+                    changes.append(self.parse_inner_change(
+                        ch, CONSTRAINT_TYPE))
             elif k == 'type':
                 constraint_type = str(v).strip()
             else:
-                if not self._parse_common_keyval(k, v, False):
-                    details[k] = v
+                # Custom constraint key/values
+                details[k] = v
 
         assert constraint_type is not None and len(constraint_type) > 0
         if is_column:
-            return ColumnConstraint(order, comment, constraint_type, details,
-                                    changes)
+            return ColumnConstraint(
+                cons_obj.order, cons_obj.comment, constraint_type, details,
+                changes)
         else:
-            return TableConstraint(order, comment, constraint_type, details,
-                                   changes)
+            return TableConstraint(
+                cons_obj.order, cons_obj.comment, constraint_type, details,
+                changes)
 
-    def _parse_table_constraint(self, d):
-        assert isinstance(d, dict)
-
-        comment = None
-        order = self.__count
-        self.__count += 1
-        constraint_type = None
-        changes = []
-        details = {}
-
-        for (k, v) in d.items():
-            k = _strip_key(k)
-            if k == 'comment':
-                assert isinstance(v, str)
-                comment = v
-            elif k == 'order':
-                order = int(v)
-            elif k == 'change':
-                changes.append(self._parse_inner_change(v, CONSTRAINT_TYPE))
-            elif k == 'changes':
-                assert isinstance(v, tuple) or isinstance(v, list)
-                for ch in v:
-                    for (kk, vv) in ch.items():
-                        kk = _strip_key(kk)
-                        if kk == 'change':
-                            changes.append(self._parse_inner_change(
-                                vv, CONSTRAINT_TYPE))
-                        else:
-                            self._error('only "change" is allowed inside '
-                                        '"changes"')
-            elif k == 'type':
-                constraint_type = str(v).strip()
-            else:
-                if not self._parse_common_keyval(k, v, False):
-                    details[k] = v
-
-        assert constraint_type is not None and len(constraint_type) > 0
-        return TableConstraint(order, comment, constraint_type, details,
-                               changes)
-
-    def _error(self, message):
-        raise Exception(str(self.__source) + ': ' + str(message))
-
-    def _parse_common_keyval(self, k, v, fail = True):
-        if k == 'error':
-            raise Exception(str(self.__source) + ': defines error "' + str(v) +
-                            '"')
-        elif k == 'warning':
-            print("**WARNING** (" + str(self.__source) + ")", str(v))
-        elif  k == 'note':
-            print("Note (" + str(self.__source) + ")", str(v))
-        elif fail:
-            raise Exception(str(self.__source) + ": unknown key: " + str(k))
-        else:
-            return False
-        return True
+    def error(self, message):
+        raise Exception(str(self.__current_source) + ': ' + str(message))
 
     def _parse_value_type_value(self, d):
+        # FIXME update the value type to support dialects
         if d is None or isinstance(d, str):
             return ValueTypeValue(d, None, None, None, None)
 
         assert isinstance(d, dict)
 
+        value_obj = BaseObjectBuilder(self)
+        sql_set = []
         vt = None
         val = None
 
         for (k, v) in d.items():
             k = _strip_key(k)
+            if value_obj.parse(k, v):
+                # Handled
+                pass
             if k == 'type':
                 vt = str(v).strip()
+            # FIXME include "dialects" parsing
             elif k == 'value':
                 val = v
+            elif k == 'dialects':
+                for ch in self.fetch_dicts_from_list(k, v, 'dialect'):
+                    sql = SqlStatementBuilder()
+                    sql_set.append(sql.make(ch))
+            elif k == 'sql':
+                ch = {
+                    'syntax': 'universal',
+                    'platforms': 'all',
+                    'sql': v
+                }
+                sql = SqlStatementBuilder()
+                sql_set.append(sql.make(ch))
             else:
-                self._parse_common_keyval(k, v)
+                self.error("unknown key (" + k + ") set to " + repr(v))
 
         if (vt == 'int' or vt == 'float' or vt == 'double' or
                 (vt is not None and vt.startswith('numeric'))):
@@ -527,9 +522,38 @@ class SchemaParser(object):
         elif vt == 'date' or vt == 'time' or vt == 'datetime':
             return ValueTypeValue(None, None, None, str(val), None)
         elif vt == 'computed' or vt == 'sql':
-            return ValueTypeValue(None, None, None, None, str(val))
+            if len(sql_set) < 0 and val is not None and len(val) > 0:
+                ch = {
+                    'syntax': 'universal',
+                    'platforms': 'all',
+                    'sql': val
+                }
+                sql = SqlStatementBuilder()
+                sql_set.append(sql.make(ch))
+            if len(sql_set) <= 0:
+                self.error("computed value types must have a value or dialect")
+            return ValueTypeValue(None, None, None, None, SqlSet(sql_set))
         elif vt == 'str' or vt == 'string' or vt == 'char' or vt == 'varchar':
             return ValueTypeValue(str(val), None, None, None, None)
+        else:
+            self.error("unknown value type " + vt)
+
+    def fetch_dicts_from_list(self, k, v, expected_elements):
+        assert isinstance(v, tuple) or isinstance(v, list)
+        if not (isinstance(v, tuple) or isinstance(v, list)):
+            self.error('"' + k + '" does not contain a list, but ' + repr(v))
+        if isinstance(expected_elements, str):
+            expected_elements = [expected_elements]
+        ret = []
+        for ch in v:
+            for (kk, vv) in ch.items():
+                kk = _strip_key(kk)
+                if kk in expected_elements:
+                    ret.append(vv)
+                else:
+                    self.error('only ' + str(expected_elements) +
+                               ' are allowed inside "' + k + '"')
+        return ret
 
 
 def _parse_schema_type(type_name):

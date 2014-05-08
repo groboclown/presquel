@@ -560,6 +560,9 @@ class ProcessedPhpValidationConstraint(AbstractProcessedConstraint):
 
 
 class SqlConstraint(AbstractProcessedConstraint):
+
+    # FIXME make this better match the SqlString and SqlSet
+
     def __init__(self, column, constraint, command):
         AbstractProcessedConstraint.__init__(self, column, constraint)
         assert command in ('create', 'update', 'read')

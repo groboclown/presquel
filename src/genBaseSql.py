@@ -5,12 +5,13 @@ import sys
 import sqlmigration
 
 
-def find_max_order(mo, schema_list):
-    for schema in schema_list:
-        if schema.order > mo:
-            mo = schema.order
-        mo = find_max_order(mo, schema.sub_schema)
-    return mo
+def find_max_order_len(max_len, schema_list):
+    for sch in schema_list:
+        ord_len = len(str(sch.order.items()[0]))
+        if ord_len > max_len:
+            max_len = ord_len
+        max_len = find_max_order_len(max_len, sch.sub_schema)
+    return max_len
 
 
 if __name__ == '__main__':
@@ -29,11 +30,11 @@ if __name__ == '__main__':
         raise Exception("no versions found")
 
     version = versions[0]
-    max_order = find_max_order(-1, version.schema)
-    name_format = '{0:0' + str(len(str(max_order))) + 'd}_{1}.sql'
+    order_length = find_max_order_len(-1, version.schema)
+    name_format = ('{0:0' + str(order_length) + 'd}_{1}.sql')
     for schema in version.schema:
-        filename = os.path.join(outdir,
-                                name_format.format(schema.order, schema.name))
+        filename = os.path.join(outdir, name_format.format(
+            schema.order.items()[0], schema.name))
         print("Generating " + filename)
         with open(filename, 'w') as f:
             for script in gen.generate_base(schema):

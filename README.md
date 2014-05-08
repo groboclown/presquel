@@ -295,9 +295,7 @@ This is still an early-development tool.  Here's the current todo list.
  These are already created automatically for foreign keys.
 * Eliminate automatic join logic on foreign keys; this needs to be done with
  views instead.
-* Add support for default values to have per-platform values.
-* Redo the parsing logic to make a unified method to specify platform-specific
- sql.
+* Create a generic extended analysis for use in creating code generators.
 * Add support for implicit trigger creation via constraints.
 * Ensure the Dewey Decimal versioning system works as expected.
 * Add version info files to indicate previous version.

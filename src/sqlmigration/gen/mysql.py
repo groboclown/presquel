@@ -2,7 +2,7 @@
 Base classes used for the generation of code based on the model objects.
 """
 
-from ..model import (ValueTypeValue, View, Table)
+from ..model import (ValueTypeValue, View, Table, SqlString)
 from .base import (SchemaScriptGenerator)
 import time
 
@@ -235,7 +235,11 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
         sql = 'CREATE '
         if view.replace_if_exists:
             sql += 'OR REPLACE '
-        sql += 'VIEW ' + view.name + ' AS\n' + view.select_query + ';\n'
+        sql_string = view.select_query.get_for_platform('mysql')
+        if sql_string is None:
+            raise Exception("no mysql support for view " + view.name)
+        assert isinstance(sql_string, SqlString)
+        sql += 'VIEW ' + view.name + ' AS\n' + sql_string.sql + ';\n'
         return [self._header(view), sql]
 
     def _generate_base_sequence(self, sequence):

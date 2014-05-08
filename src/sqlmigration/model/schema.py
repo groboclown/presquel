@@ -3,7 +3,8 @@ Describes the current schema for the database version.
 """
 
 from .base import (BaseObject, TABLE_TYPE, COLUMN_TYPE, VIEW_TYPE,
-                   CONSTRAINT_TYPE, SEQUENCE_TYPE, PROCEDURE_TYPE)
+                   CONSTRAINT_TYPE, SEQUENCE_TYPE, PROCEDURE_TYPE,
+                   SqlSet)
 
 
 class SchemaObject(BaseObject):
@@ -53,6 +54,7 @@ class ValueTypeValue(object):
     """
     def __init__(self, str_value, numeric_value, boolean_value, date_value,
                  computed_value):
+        assert computed_value is None or isinstance(computed_value, SqlSet)
         object.__init__(self)
         self.__str_value = str_value
         self.__numeric_value = numeric_value
@@ -78,6 +80,10 @@ class ValueTypeValue(object):
 
     @property
     def computed_value(self):
+        """
+
+        :return: None or SqlSet
+        """
         return self.__computed_value
 
 
@@ -237,6 +243,7 @@ class View(SchemaObject):
                  table_constraints, changes):
         SchemaObject.__init__(self, view_name, order, comment, VIEW_TYPE,
                               changes)
+        assert isinstance(select_query, SqlSet)
         self.__catalog_name = catalog_name
         self.__replace_if_exists = replace_if_exists
         self.__schema_name = schema_name
@@ -263,6 +270,10 @@ class View(SchemaObject):
 
     @property
     def select_query(self):
+        """
+
+        :return: SqlSet
+        """
         return self.__select_query
 
     @property

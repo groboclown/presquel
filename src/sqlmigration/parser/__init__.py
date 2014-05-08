@@ -1,6 +1,6 @@
 __author__ = 'Groboclown'
 
-from .base import *
+from .base import SchemaParser
 from .parse_json import *
 from .parse_xml import *
 from .parse_yaml import *

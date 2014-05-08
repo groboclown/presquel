@@ -4,7 +4,7 @@ a version's schema.  All the changes should migrate the database from the
 previous version to the current version.
 """
 
-from .base import BaseObject
+from .base import (BaseObject, SqlSet)
 
 
 class ChangeType(object):
@@ -50,21 +50,15 @@ class Change(BaseObject):
 
 
 class SqlChange(Change):
-    def __init__(self, order, comment, object_type, sql, platforms):
+    def __init__(self, order, comment, object_type, sql_set):
         Change.__init__(self, order, comment, object_type, SQL_CHANGE)
-        self.__sql = sql
-        self.__platforms = platforms
+        assert isinstance(sql_set, SqlSet)
+        self.__sql_set = sql_set
 
     @property
-    def sql(self):
-        return self.__sql
-
-    @property
-    def platforms(self):
+    def sql_set(self):
         """
-        Returns a list of the database platforms on which this sql change
-        can run.
 
-        :return: list(str)
+        :return: SqlSet
         """
-        return self.__platforms
+        return self.__sql_set
