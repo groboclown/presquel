@@ -138,7 +138,7 @@ class SqlConstraint(Constraint):
                  sql_set, arguments, changes):
         Constraint.__init__(self, order, comment, constraint_type, column_names,
                             details, changes)
-        assert isinstance(SqlSet, sql_set)
+        assert isinstance(sql_set, SqlSet)
         self.__sql_set = sql_set
         self.__arguments = arguments or []
 

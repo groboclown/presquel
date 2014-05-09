@@ -493,7 +493,7 @@ class SchemaParser(object):
                     sql = SqlStatementBuilder()
                     ss.append(sql.make(ch))
                 sql_set = SqlSet(ss)
-            elif k == 'sql':
+            elif k == 'sql' or k == 'value':
                 ch = {
                     'syntax': 'universal',
                     'platforms': 'all',

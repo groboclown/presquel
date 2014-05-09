@@ -298,6 +298,9 @@ This is still an early-development tool.  Here's the current todo list.
 * Add support for implicit trigger creation via constraints.
 * Ensure the Dewey Decimal versioning system works as expected.
 * Add version info files to indicate previous version.
+* Add optional where clause support to the format and code generation.  These
+ should be implemented as individual objects (each clause) that are passed
+ into the methods.
 * Add change syntax support.
 * Add change sql generation.
 * Add the version copy tool.

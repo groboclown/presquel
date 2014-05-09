@@ -11,3 +11,4 @@ from .parser import parse_versions
 from .schemagen import get_generator
 
 from . import model
+from . import codegen

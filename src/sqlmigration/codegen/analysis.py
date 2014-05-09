@@ -1,7 +1,7 @@
 # !/usr/bin/python3
 
 from ..model import (Column, Table, View, SchemaVersion, SchemaObject,
-                     Constraint)
+                     Constraint, SqlConstraint)
 
 
 class AnalysisModel(object):
@@ -100,15 +100,17 @@ class AnalysisModel(object):
             top_constraints.append(
                 self._process_constraint(schema, c, pkg, is_read_only))
 
+        top_analysis = TopAnalysis(schema, pkg, top_constraints, is_read_only)
+
         return self._create_columnset_analysis(
-            schema, self.__schema_packages[schema], cols, top_constraints,
+            schema, self.__schema_packages[schema], cols, top_analysis,
             is_read_only)
 
     def _process_column(self, column, package, is_read_only):
         constraints_analysis = []
         for c in column.constraints:
             constraints_analysis.append(
-                self._process_constraint(c, package, is_read_only))
+                self._process_constraint(column, c, package, is_read_only))
         return self._create_column_analysis(
             column, package, constraints_analysis, is_read_only)
 
@@ -124,7 +126,7 @@ class AnalysisModel(object):
     def _create_columnset_analysis(self, schema, package, column_analysis,
                                    top_analysis, is_read_only):
         return ColumnSetAnalysis(schema, package, tuple(column_analysis),
-                                 tuple(top_analysis), is_read_only)
+                                 top_analysis, is_read_only)
 
     def _create_column_analysis(self, column, package, constraints_analysis,
                                 is_read_only):
@@ -156,6 +158,7 @@ class SchemaAnalysis(object):
 
     def update_references(self, analysis_model):
         assert isinstance(analysis_model, AnalysisModel)
+        # Nothing to do
         pass
 
 
@@ -165,19 +168,10 @@ class ColumnSetAnalysis(SchemaAnalysis):
         SchemaAnalysis.__init__(self, schema_obj, package)
         assert isinstance(schema_obj, Table) or isinstance(schema_obj, View)
         assert isinstance(columns_analysis, tuple)
-        assert isinstance(top_analysis, tuple)
+        assert isinstance(top_analysis, TopAnalysis)
         self.__columns_analysis = columns_analysis
         self.__top_analysis = top_analysis
-        self.__read_analysis = []
-        self.__create_analysis = []
-        self.__update_analysis = []
-
-        # FIXME split up the columns_ and top_ into the 3 categories
-
-
-
-        if not is_read_only:
-            pass
+        self.__is_read_only = is_read_only
 
     def update_references(self, analysis_model):
         assert isinstance(analysis_model, AnalysisModel)
@@ -185,8 +179,11 @@ class ColumnSetAnalysis(SchemaAnalysis):
 
         for c in self.__columns_analysis:
             c.update_references(analysis_model)
-        for c in self.__top_analysis:
-            c.update_references(analysis_model)
+        self.__top_analysis.update_references(analysis_model)
+
+    @property
+    def is_read_only(self):
+        return self.__is_read_only
 
     @property
     def columns_analysis(self):
@@ -224,17 +221,21 @@ class ColumnSetAnalysis(SchemaAnalysis):
             foreign keys in this column set.
         """
         ret = []
-        for ca in self.__columns_analysis:
-            # FIXME it will contain a column analysis, not a constraint analysis
-            if isinstance(ca, ProcessedForeignKeyConstraint):
-                ret.append(ca)
+        for cola in self.__columns_analysis:
+            assert isinstance(cola, ColumnAnalysis)
+            for ca in cola.constraints:
+                if isinstance(ca, ProcessedForeignKeyConstraint):
+                    ret.append(ca)
         return ret
 
-    def get_selectable_column_sets(self):
+    def get_selectable_column_lists(self):
         """
 
         :return: a list of list of columns that can be used to query the
-            schema.
+            schema.  The column information will be the Column schema object.
+            These Column schema objects will only be from this table object,
+            never from the joined tables.  That behavior must instead be done
+            through a view.
         """
         ret = []
         for c in self.columns_analysis:
@@ -242,9 +243,102 @@ class ColumnSetAnalysis(SchemaAnalysis):
             if c.read_by:
                 ret.append([c.schema])
 
-        for c in self.top_analysis:
-            assert isinstance(c, TopAnalysis)
-            ret.extend(c.column_index_sets)
+        c = self.top_analysis
+        assert isinstance(c, TopAnalysis)
+        for col_set in c.column_index_sets:
+            ret.append([self.get_column_analysis(col).schema
+                        for col in col_set])
+
+        return ret
+
+    @property
+    def top_read_validations(self):
+        """
+
+        :return: list of all top-level validations for read operations
+        """
+        ret = []
+        c = self.top_analysis
+        assert isinstance(c, TopAnalysis)
+        ret.extend(c.read_validations)
+        return ret
+
+    @property
+    def top_write_validations(self):
+        """
+
+        :return: list of all top-level validations for read operations
+        """
+        ret = []
+        c = self.top_analysis
+        assert isinstance(c, TopAnalysis)
+        ret.extend(c.write_validations)
+        return ret
+
+    @property
+    def primary_key_columns(self):
+        """
+        Generally used for the delete creation.
+
+        :return: the list of ColumnAnalysis which make up the primary key.
+        """
+        ret = None
+        for c in self.columns_analysis:
+            assert isinstance(c, ColumnAnalysis)
+            if c.is_primary_key:
+                assert ret is None, "multiple primary keys"
+                ret = [c]
+        c = self.top_analysis
+        assert isinstance(c, TopAnalysis)
+        if c.primary_key_constraint is not None:
+            assert ret is None, "multiple primary keys"
+            con = c.primary_key_constraint
+            assert isinstance(con, AbstractProcessedConstraint)
+            ret = [self.get_column_analysis(cn)
+                   for cn in con.constraint.column_names]
+        return ret
+
+    @property
+    def columns_for_read(self):
+        ret = []
+        for c in self.columns_analysis:
+            assert isinstance(c, ColumnAnalysis)
+            if c.is_read:
+                ret.append(c)
+        return ret
+
+    @property
+    def columns_for_create(self):
+        """
+
+        :return: the columns which are involved in the creation of the rows.
+            The objects are instances of ColumnAnalysis
+        """
+        if self.is_read_only:
+            return []
+
+        ret = []
+        for c in self.columns_analysis:
+            assert isinstance(c, ColumnAnalysis)
+            if len(c.create_arguments) > 0:
+                ret.append(c)
+        return ret
+
+    @property
+    def columns_for_update(self):
+        """
+
+        :return: the columns which are involved in updating rows
+        """
+        if self.is_read_only:
+            return []
+
+        ret = []
+        for c in self.columns_analysis:
+            assert isinstance(c, ColumnAnalysis)
+            if len(c.update_arguments) > 0:
+                ret.append(c)
+        return ret
 
 
 class ColumnAnalysis(SchemaAnalysis):
@@ -253,8 +347,15 @@ class ColumnAnalysis(SchemaAnalysis):
         assert isinstance(column, Column)
         self.is_read_only = is_read_only
 
+        self.is_primary_key = False
         self.is_read = True
+        self.allows_create = not column.auto_increment
+        self.allows_update = True
         self.default_value = column.default_value
+        assert (self.default_value is None or
+                isinstance(self.default_value, SqlConstraint))
+        assert (self.default_value is None or
+                len(self.default_value.arguments) <= 0)
         self.auto_gen = column.auto_increment
         self.update_value = None
         self.create_value = None
@@ -262,8 +363,11 @@ class ColumnAnalysis(SchemaAnalysis):
         self.constraints = []
         self.foreign_key = None
         self.read_by = False
-        self.read_validation = []
-        self.write_validation = []
+        # By default, every column allows null unless you explicitly turn it off
+        self.is_nullable = True
+        self.query_restrictions = []
+        self.read_validations = []
+        self.write_validations = []
         self.__constraints_analysis = []
 
         for c in constraints_analysis:
@@ -274,23 +378,34 @@ class ColumnAnalysis(SchemaAnalysis):
             if isinstance(c, ProcessedForeignKeyConstraint):
                 assert self.foreign_key is None
                 self.foreign_key = c
+                self.read_by = True
             elif (c.constraint.constraint_type.endswith('index') or
                     c.constraint.constraint_type.endswith('key')):
                 self.read_by = True
+                if c.constraint.constraint_type == 'primarykey':
+                    self.is_primary_key = True
             elif c.constraint.constraint_type == 'initialvalue':
+                con = c.constraint
+                assert isinstance(con, SqlConstraint)
                 self.create_value = c
+                self.allows_create = (self.allows_create and
+                                      len(con.arguments) > 0)
             elif c.constraint.constraint_type == 'noupdate':
-                self.is_read_only = True
+                self.allows_update = False
             elif c.constraint.constraint_type == 'notread':
                 self.is_read = False
             elif c.constraint.constraint_type == 'constantquery':
                 self.read_value = c
             elif c.constraint.constraint_type == 'constantupdate':
                 self.update_value = c
+            elif c.constraint.constraint_type == 'restrictquery':
+                self.query_restrictions.append(c)
             elif c.constraint.constraint_type == 'validateread':
-                self.read_validation.append(c)
+                self.read_validations.append(c)
+            elif c.constraint.constraint_type == 'notnull':
+                self.is_nullable = False
             elif c.constraint.constraint_type in ['validatewrite', 'validate']:
-                self.write_validation.append(c)
+                self.write_validations.append(c)
 
         self.read_by = self.read_by and self.is_read
 
@@ -307,6 +422,7 @@ class ColumnAnalysis(SchemaAnalysis):
         Return all arguments used to create this column.  An empty list
         means that a default value will be used.  If the column is used
         as-is, then the column name is returned in the list.
+        This will not return the values defined in the default argument list
 
         :return: list of strings
         """
@@ -332,11 +448,24 @@ class ColumnAnalysis(SchemaAnalysis):
 
 
 class TopAnalysis(SchemaAnalysis):
+    """
+    An analysis of the constraints around a top-level object.
+
+    @column_index_sets - a list of lists of column names (string).  Each
+        entry in this list represents the columns that can be selected
+        together as a group.
+    """
+
     def __init__(self, schema, package, constraints_analysis, is_read_only):
         SchemaAnalysis.__init__(self, schema, package)
         assert (isinstance(schema, Table) or isinstance(schema, View))
 
+        self.is_read_only = is_read_only
         self.__constraints_analysis = []
+        self.read_validations = []
+        self.write_validations = []
+        self.primary_key_constraint = None
+
         self.column_index_sets = []
 
         for c in constraints_analysis:
@@ -346,20 +475,31 @@ class TopAnalysis(SchemaAnalysis):
             self.__constraints_analysis.append(c)
 
             if (c.constraint.constraint_type.endswith('index') or
-                  c.constraint.constraint_type.endswith('key')):
+                    c.constraint.constraint_type.endswith('key')):
                 column_names = c.constraint.column_names
                 if column_names is not None and len(column_names) > 0:
                     self.column_index_sets.append(column_names)
+                    if c.constraint.constraint_type == 'primarykey':
+                        assert self.primary_key_constraint is None
+                        self.primary_key_constraint = c
+            elif c.constraint.constraint_type == 'validateread':
+                self.read_validations.append(c)
+            elif c.constraint.constraint_type in ['validatewrite', 'validate']:
+                self.write_validations.append(c)
 
 
 class AbstractProcessedConstraint(SchemaAnalysis):
     def __init__(self, column, package, constraint, name=None):
         SchemaAnalysis.__init__(self, constraint, package)
-        assert column is None or isinstance(column, Column)
+
+        self.column = column
+        if column is not None and (isinstance(column, Table) or
+                                   isinstance(column, View)):
+            self.column = None
+
+        assert self.column is None or isinstance(self.column, Column)
         assert isinstance(constraint, Constraint)
 
-        object.__init__(self)
-        self.column = column
         self.constraint = constraint
         self.column_name = name or column.name
 
