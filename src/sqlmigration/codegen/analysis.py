@@ -251,6 +251,35 @@ class ColumnSetAnalysis(SchemaAnalysis):
 
         return ret
 
+    def get_read_validations(self):
+        """
+
+        :return: list of pairs: (column, validation constraint).  If it
+            comes from a top-level constraint, the column is None.
+        """
+        ret = []
+        for v in self.top_read_validations:
+            ret.append([None, v])
+        for c in self.columns_analysis:
+            for v in c.read_validations:
+                ret.append([c.schema, v])
+        return ret
+
+    def get_write_validations(self):
+        """
+
+        :return: list of pairs: (column, validation constraint).  If it
+            comes from a top-level constraint, the column is None.
+        """
+        ret = []
+        for v in self.top_write_validations:
+            ret.append([None, v])
+        for c in self.columns_analysis:
+            for v in c.write_validations:
+                ret.append([c.schema, v])
+        return ret
+
+
     @property
     def top_read_validations(self):
         """
@@ -320,7 +349,7 @@ class ColumnSetAnalysis(SchemaAnalysis):
         ret = []
         for c in self.columns_analysis:
             assert isinstance(c, ColumnAnalysis)
-            if len(c.create_arguments) > 0:
+            if c.allows_create:
                 ret.append(c)
         return ret
 
@@ -336,7 +365,7 @@ class ColumnSetAnalysis(SchemaAnalysis):
         ret = []
         for c in self.columns_analysis:
             assert isinstance(c, ColumnAnalysis)
-            if len(c.update_arguments) > 0:
+            if c.allows_update:
                 ret.append(c)
         return ret
 
@@ -388,8 +417,7 @@ class ColumnAnalysis(SchemaAnalysis):
                 con = c.constraint
                 assert isinstance(con, SqlConstraint)
                 self.create_value = c
-                self.allows_create = (self.allows_create and
-                                      len(con.arguments) > 0)
+                self.allows_create = True
             elif c.constraint.constraint_type == 'noupdate':
                 self.allows_update = False
             elif c.constraint.constraint_type == 'notread':

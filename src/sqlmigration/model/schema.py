@@ -146,6 +146,24 @@ class SqlConstraint(Constraint):
     def sql(self):
         return self.__sql_set
 
+    def sql_args(self, platforms, arg_converter):
+        """
+        Return the sql for the given platforms, with the argument values
+        replaced, using the function "arg_converter", which takes the argument
+        name as input, and outputs the prepared statement replacement string.
+
+        :param arg_converter:
+        :return:
+        """
+        ret = self.sql.get_for_platform(platforms)
+        if ret is None:
+            return None
+        ret = ret.sql
+        for a in self.arguments:
+            ret = ret.replace('{' + a + '}', arg_converter(a))
+        return ret
+
+
     @property
     def arguments(self):
         return self.__arguments

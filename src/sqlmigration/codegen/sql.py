@@ -35,8 +35,12 @@ class ReadQueryData(object):
                     handled = True
                     col_names.append(column.sql_name)
                     for arg in constraint.arguments:
+                        # FIXME this is mysql specific syntax.
+                        # FIXME this should instead use the SqlConstraint
+                        # method to get the replaced string.
                         value = value.replace('{' + arg + '}', ':' + arg)
-                    col_query.append(value)
+                    # FIXME is this the correct thing to do?
+                    col_query.append(value + ' AS ' + column.sql_name)
                     arguments.extend(constraint.arguments)
 
             if not handled:

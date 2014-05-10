@@ -14,8 +14,6 @@ schema_by_name = {}
 
 PLATFORMS = ['mysql']
 
-# FIXME Analysis should use the codegen tool
-
 
 def generate_file(analysis_obj):
     assert isinstance(analysis_obj, sqlmigration.codegen.ColumnSetAnalysis)
@@ -53,9 +51,9 @@ def generate_file(analysis_obj):
         if not analysis_obj.is_read_only:
             #print("Not read only: " + analysis_obj.sql_name)
             f.writelines('\n'.join(generate_create(analysis_obj)))
+            f.writelines((line + '\n') for line in generate_update(
+                analysis_obj))
             # FIXME
-            #f.writelines((line + '\n') for line in generate_update(
-            #    analysis_obj))
             #f.writelines(line + '\n' for line in generate_delete(
             #    analysis_obj))
 
@@ -151,20 +149,27 @@ def generate_read(analysis_obj):
         '        $stmt->setFetchMode(PDO::FETCH_ASSOC);',
         '        $stmt->execute($data);',
         '        if ($this->checkForErrors($db)) { return false; }',
-        '        $rows = array();',
-        '        foreach ($stmt->fetchAll() as $row) {',
-        '            if (!$this->validateRead($row)) {',
-        '                return False;',
-        '            }',
-        '            $rows[] = $row;',
-        '        }',
-        '        return $rows;',
-        '    }',
-        ''
     ])
+    if len(analysis_obj.get_read_validations()) > 0:
+        ret.extend([
+            '        $rows = array();',
+            '        foreach ($stmt->fetchAll() as $row) {',
+            '            if (!$this->validateRead($row)) {',
+            '                return false;',
+            '            }',
+            '            $rows[] = $row;',
+            '        }',
+            ''
+        ])
+    else:
+        ret.extend([
+            '        $rows = $stmt->fetchAll();',
+        ])
 
-    # TODO should we still have a generic "read" function that reads the
-    # primary keys?  It's a repetition of the "readBy" methods.
+    ret.extend([
+        '        return $rows;',
+        '    }', '',
+    ])
 
     # TODO replace the "where clause" with the real where clause data structures
 
@@ -189,6 +194,7 @@ def generate_read(analysis_obj):
         '        $stmt->setFetchMode(PDO::FETCH_ASSOC);',
         '        $stmt->execute($data);',
         '        if ($this->checkForErrors($db)) { return false; }',
+        # No analysis can be done with the results
         '        $rows = $stmt->fetchAll();',
         '        return $rows;',
         '    }',
@@ -198,12 +204,9 @@ def generate_read(analysis_obj):
     for read_by_columns in analysis_obj.get_selectable_column_lists():
         assert len(read_by_columns) > 0
 
-        # FIXME if the read-by is a primary key or unique key, then the
+        # TODO if the read-by is a primary key or unique key, then the
         # order MUST NOT be part of the query, and even the start/end should
         # be removed.
-
-        # FIXME if there are no read validations, then there shouldn't be
-        # any loop-over-rows at the end.
 
         # each column in the column lists comes from the current table, and
         # never from a joined-to table.  So, we don't need to worry about
@@ -261,16 +264,27 @@ def generate_read(analysis_obj):
             '        $stmt->setFetchMode(PDO::FETCH_ASSOC);',
             '        $stmt->execute($data);',
             '        if ($this->checkForErrors($db)) { return false; }',
-            '        $rows = array();',
-            '        foreach ($stmt->fetchAll() as $row) {',
-            '            if (!$this->validateRead($row)) {',
-            '                return false;',
-            '            }',
-            '            $rows[] = $row;',
-            '        }',
+        ])
+
+        if len(analysis_obj.get_read_validations()) > 0:
+            ret.extend([
+                '        $rows = array();',
+                '        foreach ($stmt->fetchAll() as $row) {',
+                '            if (!$this->validateRead($row)) {',
+                '                return false;',
+                '            }',
+                '            $rows[] = $row;',
+                '        }',
+                ''
+            ])
+        else:
+            ret.extend([
+                '        $rows = $stmt->fetchAll();',
+            ])
+
+        ret.extend([
             '        return $rows;',
-            '    }',
-            ''
+            '    }', '',
         ])
 
     return ret
@@ -285,6 +299,7 @@ def generate_create(analysis_obj):
     php_required_argument_list = []
     hard_coded_column_names = []
     hard_coded_column_values = []
+    default_column_arguments = []
     auto_gen_columns = []
     for c in columns:
         assert isinstance(c, sqlmigration.codegen.ColumnAnalysis)
@@ -296,30 +311,30 @@ def generate_create(analysis_obj):
             arguments = c.create_arguments
             if c.default_value is not None:
                 php_default_argument_list.extend(arguments)
-            elif len(arguments) > 0:
+                default_column_arguments.append([c.sql_name, arguments])
+
+            elif c.create_value is not None:
                 php_required_argument_list.extend(arguments)
                 hard_coded_column_names.append(c.sql_name)
-                if c.create_value is not None:
-                    cv = c.create_value
-                    assert isinstance(
-                        cv, sqlmigration.model.SqlConstraint)
-                    cv_sql = cv.sql
-                    assert isinstance(
-                        cv_sql, sqlmigration.model.SqlSet)
-                    hard_coded_column_values.append(
-                        cv_sql.get_for_platform(PLATFORMS))
-                else:
-                    # "arguments" should match the column name
-                    assert len(arguments) == 1
-                    hard_coded_column_values.extend(arguments)
-        elif c.create_value is not None:
-            # fixed initial value whose settings cannot be changed by the user
-            cv = c.create_value
-            assert isinstance(cv, sqlmigration.model.SqlConstraint)
-            cv_sql = cv.sql
-            assert isinstance(cv_sql, sqlmigration.model.SqlSet)
-            hard_coded_column_names.append(c.sql_name)
-            hard_coded_column_values.append(cv_sql.get_for_platform(PLATFORMS))
+
+                cv = c.create_value.constraint
+                # TODO In the future, this could be code
+                assert isinstance(
+                    cv, sqlmigration.model.SqlConstraint)
+                cv_sql = cv.sql_args(PLATFORMS, lambda a: ':' + a)
+                assert cv_sql is not None
+                hard_coded_column_values.append(cv_sql)
+
+            elif len(arguments) > 0:
+                # "arguments" should match the column name
+                assert len(arguments) == 1
+                php_required_argument_list.extend(arguments)
+                hard_coded_column_names.append(
+                    c.sql_name)
+                hard_coded_column_values.extend(':' + a for a in arguments)
+
+            else:
+                raise Exception("bad state")
 
     php_argument_list = [('$' + a) for a in php_required_argument_list]
     php_argument_list.extend([
@@ -349,6 +364,7 @@ def generate_create(analysis_obj):
         ret.append('            \'' + r + '\' => $' + r)
     ret.append('        );')
 
+    # FIXME default value could be a sql syntax with 0 or more arguments.
     for r in php_default_argument_list:
         ret.extend([
             '        if ($' + r + ' !== false) {',
@@ -363,9 +379,10 @@ def generate_create(analysis_obj):
                 '                $values .= \', \';',
                 '            }',
             ])
+        # FIXME default value could potentially be a sql syntax.
         ret.extend([
             '            $sql .= \'' + r + '\';',
-            '            $values .= \'' + r + '\';',
+            '            $values .= \':' + r + '\';',
             '        }',
         ])
 
@@ -388,7 +405,116 @@ def generate_create(analysis_obj):
         '        return $data;',
         '    }',
         ''
+    ])
 
+    return ret
+
+
+def generate_update(analysis_obj):
+    assert isinstance(analysis_obj, sqlmigration.codegen.ColumnSetAnalysis)
+
+    column_name_values = {}
+    required_argument_names = []
+    optional_argument_names = []
+    optional_col_args = []
+    where_ands = []
+    always_column_names = []
+
+    # TODO if there are any "always_column_names", then the "$set_count" logic
+    # should be skipped.
+
+    # TODO if there is just one optional_argument_names, then it should be
+    # required.
+
+    for column in analysis_obj.primary_key_columns:
+        assert isinstance(column, sqlmigration.codegen.ColumnAnalysis)
+        assert column.update_value is None
+        required_argument_names.append(column.sql_name)
+        where_ands.append(column.sql_name + ' = :' + column.sql_name)
+
+    for column in analysis_obj.columns_for_update:
+        assert isinstance(column, sqlmigration.codegen.ColumnAnalysis)
+        if not column in analysis_obj.primary_key_columns:
+            uv = column.update_value
+            if uv is not None:
+                uvc = uv.constraint
+                # TODO in the future, this might be code
+                assert isinstance(uvc, sqlmigration.model.SqlConstraint)
+                column_name_values[column.sql_name] = uvc.sql_args(
+                    PLATFORMS, lambda a: ':' + a)
+                assert column_name_values[column.sql_name] is not None
+                if len(column.update_arguments) > 0:
+                    optional_col_args.append(
+                        [column.sql_name, column.update_arguments])
+                    optional_argument_names.extend(column.update_arguments)
+                else:
+                    always_column_names.append(column.sql_name)
+
+            else:
+                column_name_values[column.sql_name] = column.sql_name
+                optional_col_args.append([column.sql_name, [column.sql_name]])
+                optional_argument_names.append(column.sql_name)
+
+    if len(required_argument_names) <= 0:
+        raise Exception("cannot update table because there is no primary key")
+
+    if len(optional_argument_names) <= 0:
+        # Nothing to do
+        return []
+
+    initial_update = 'UPDATE ' + analysis_obj.sql_name + ' '
+    first = True
+    for n in always_column_names:
+        if first:
+            first = False
+        else:
+            initial_update += ', '
+        initial_update += 'SET ' + n + ' = ' + column_name_values[n]
+
+    ret = [
+        '',
+        '    public function update($db, ' +
+        (', '.join(('$' + n) for n in required_argument_names)) + ', ' +
+        (', '.join(('$' + n + ' = false') for n in optional_argument_names)) +
+        ') {',
+        '        $sql = "' + initial_update + '";',
+        '        $set_count = ' + str(len(always_column_names)) + ';',
+        '        $data = array(',
+    ]
+    for n in required_argument_names:
+        ret.extend([
+            '            "' + n + '" => $' + n + ',',
+        ])
+    ret.extend([
+        '        );',
+    ])
+    for n in optional_col_args:
+        ret.extend(['        if (' + (
+            ' && '.join(('$' + c + ' !== false')
+                        for c in n[1])) + ') {',
+            '            if ($set_count > 0) {',
+            '                $sql .= ", "',
+            '            }',
+            '            $set_count++;',
+            '            $sql .= "SET ' + n[0] + ' = :' +
+            column_name_values[n[0]] + '";',
+        ])
+        for anx in n[1]:
+            ret.append('            $data["' + anx + '"] = $' + anx + ';')
+
+        ret.append('        }')
+
+    if len(where_ands) > 0:
+        ret.append('        $sql .= " WHERE ' + (' AND '.join(where_ands)) +
+                   '";')
+
+    # FIXME check if updated row count was 0, and if so report an error.
+    ret.extend([
+        '        $stmt = $db->prepare($sql);',
+        '        $stmt->execute($data);',
+        '        if ($this->checkForErrors($db)) { return false; }',
+        '        return $data;',
+        '    }', ''
     ])
 
     return ret
@@ -400,61 +526,6 @@ def generate_create(analysis_obj):
     # FIXME --------------------------------------------------------
     # FIXME --------------------------------------------------------
     # FIXME all below here
-
-
-def generate_update(schema_obj, processed_columns):
-    assert (isinstance(schema_obj, sqlmigration.model.Table)
-            or isinstance(schema_obj, sqlmigration.model.View))
-    assert isinstance(processed_columns, ProcessedColumnSet)
-
-    column_order = []
-    column_name_values = {}
-    for column in schema_obj.columns:
-        if column != processed_columns.primary_key_column:
-            handled = False
-            for constraint in processed_columns.values:
-                assert isinstance(constraint, SqlConstraint)
-                if (constraint.command == 'update' and
-                        constraint.column == column):
-                    if constraint.constant:
-                        # No update allowed
-                        handled = True
-                    elif constraint.value is not None:
-                        value = constraint.value
-                        if constraint.syntax != 'native':
-                            raise Exception(
-                                "value constraints can only be native")
-                        if constraint.argument is not None:
-                            value = value.replace(
-                                '{' + constraint.argument + '}',
-                                ':' + constraint.argument)
-                        handled = True
-                        column_order.append(column.name)
-                        column_name_values[column.name] = value
-            if not handled:
-                column_order.append(column.name)
-                column_name_values[column.name] = ':' + column.name
-
-    sql = 'UPDATE ' + schema_obj.name + ' SET ' +\
-          (','.join((cn + ' = ' + column_name_values[cn])
-                    for cn in column_order)) +\
-          ' WHERE ' + processed_columns.primary_key_column.name + ' = :' + \
-          processed_columns.primary_key_column.name
-
-    ret = [
-        '',
-        '    public function update($db, $data) {',
-        '        if (! $this->validateWrite($data)) {',
-        '            return False;',
-        '        }',
-        '        $stmt = $db->prepare(\'' + sql.replace("'", "''") + '\');',
-        '        $stmt->execute($data);',
-        '        if ($this->checkForErrors($db)) { return false; }',
-        '        return $data;',
-        '    }', ''
-    ]
-
-    return ret
 
 
 def generate_delete(schema_obj, processed_columns):
