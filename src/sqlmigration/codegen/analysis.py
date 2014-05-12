@@ -470,7 +470,7 @@ class ColumnAnalysis(SchemaAnalysis):
         if self.is_read_only:
             return []
         elif self.update_value is not None:
-            return getattr(self.create_value, 'arguments', [])
+            return self.create_value.arguments
         else:
             return [self.schema.name]
 
@@ -530,6 +530,8 @@ class AbstractProcessedConstraint(SchemaAnalysis):
 
         self.constraint = constraint
         self.column_name = name or column.name
+
+        self.arguments = getattr(constraint, 'arguments', [])
 
 
 class ProcessedForeignKeyConstraint(AbstractProcessedConstraint):

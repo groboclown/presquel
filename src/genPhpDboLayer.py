@@ -54,12 +54,12 @@ def generate_file(analysis_obj):
             f.writelines((line + '\n') for line in generate_update(
                 analysis_obj))
             # FIXME
-            #f.writelines(line + '\n' for line in generate_delete(
-            #    analysis_obj))
+            f.writelines(line + '\n' for line in generate_delete(
+                analysis_obj))
 
         # FIXME
-        #f.writelines((line + '\n') for line in generate_validations(
-        #    analysis_obj))
+        f.writelines((line + '\n') for line in generate_validations(
+            analysis_obj))
 
         f.write('\n'.join([
             '',
@@ -301,11 +301,13 @@ def generate_create(analysis_obj):
     hard_coded_column_values = []
     default_column_arguments = []
     auto_gen_columns = []
-    for c in columns:
-        assert isinstance(c, sqlmigration.codegen.ColumnAnalysis)
 
+    # Auto-generated columns are never ones specified for create
+    for c in analysis_obj.columns_analysis:
         if c.auto_gen:
             auto_gen_columns.append(c.sql_name)
+
+    for c in columns:
 
         if c.allows_create:
             arguments = c.create_arguments
@@ -314,13 +316,14 @@ def generate_create(analysis_obj):
                 default_column_arguments.append([c.sql_name, arguments])
 
             elif c.create_value is not None:
-                php_required_argument_list.extend(arguments)
-                hard_coded_column_names.append(c.sql_name)
-
                 cv = c.create_value.constraint
                 # TODO In the future, this could be code
                 assert isinstance(
                     cv, sqlmigration.model.SqlConstraint)
+
+                php_required_argument_list.extend(arguments)
+                hard_coded_column_names.append(c.sql_name)
+
                 cv_sql = cv.sql_args(PLATFORMS, lambda a: ':' + a)
                 assert cv_sql is not None
                 hard_coded_column_values.append(cv_sql)
@@ -342,7 +345,7 @@ def generate_create(analysis_obj):
 
     # we can have no arguments if the table is essentially just an ID.
     php_argument_str = ''
-    if len(hard_coded_column_values) > 0:
+    if len(php_argument_list) > 0:
         php_argument_str = ', ' + (', '.join(php_argument_list))
 
     ret = [
@@ -361,7 +364,7 @@ def generate_create(analysis_obj):
     ])
 
     for r in php_required_argument_list:
-        ret.append('            \'' + r + '\' => $' + r)
+        ret.append('            \'' + r + '\' => $' + r + ',')
     ret.append('        );')
 
     # FIXME default value could be a sql syntax with 0 or more arguments.
@@ -462,14 +465,14 @@ def generate_update(analysis_obj):
         # Nothing to do
         return []
 
-    initial_update = 'UPDATE ' + analysis_obj.sql_name + ' '
+    initial_update = 'UPDATE ' + analysis_obj.sql_name + ' SET '
     first = True
     for n in always_column_names:
         if first:
             first = False
         else:
             initial_update += ', '
-        initial_update += 'SET ' + n + ' = ' + column_name_values[n]
+        initial_update += n + ' = ' + column_name_values[n]
 
     ret = [
         '',
@@ -493,10 +496,10 @@ def generate_update(analysis_obj):
             ' && '.join(('$' + c + ' !== false')
                         for c in n[1])) + ') {',
             '            if ($set_count > 0) {',
-            '                $sql .= ", "',
+            '                $sql .= ", ";',
             '            }',
             '            $set_count++;',
-            '            $sql .= "SET ' + n[0] + ' = :' +
+            '            $sql .= "' + n[0] + ' = :' +
             column_name_values[n[0]] + '";',
         ])
         for anx in n[1]:
@@ -513,6 +516,7 @@ def generate_update(analysis_obj):
         '        $stmt = $db->prepare($sql);',
         '        $stmt->execute($data);',
         '        if ($this->checkForErrors($db)) { return false; }',
+        '        $data["*rows"] = $stmt->rowCount();',
         '        return $data;',
         '    }', ''
     ])
@@ -520,39 +524,43 @@ def generate_update(analysis_obj):
     return ret
 
 
-    # FIXME --------------------------------------------------------
-    # FIXME --------------------------------------------------------
-    # FIXME --------------------------------------------------------
-    # FIXME --------------------------------------------------------
-    # FIXME --------------------------------------------------------
-    # FIXME all below here
+def generate_delete(analysis_obj):
+    assert isinstance(analysis_obj, sqlmigration.codegen.ColumnSetAnalysis)
 
+    args = [('$' + c.sql_name) for c in analysis_obj.primary_key_columns]
+    if len(args) <= 0:
+        print("** WARNING: no way to delete " + analysis_obj.sql_name)
+        return []
 
-def generate_delete(schema_obj, processed_columns):
-    assert (isinstance(schema_obj, sqlmigration.model.Table)
-            or isinstance(schema_obj, sqlmigration.model.View))
-    assert isinstance(processed_columns, ProcessedColumnSet)
+    sql = ('DELETE FROM ' + analysis_obj.sql_name + ' WHERE ' +
+           ' AND '.join([(c.sql_name + ' = :' + c.sql_name)
+           for c in analysis_obj.primary_key_columns]))
 
-    sql = ('DELETE FROM ' + schema_obj.name + ' WHERE ' + processed_columns.
-           primary_key_column.name + ' = :' +
-           processed_columns.primary_key_column.name)
-
+    # FIXME return the number of rows removed
     ret = [
         '',
-        '    public function remove($db, $data) {',
-        '        $stmt = $db->prepare(\'' + sql.replace("'", "''") + '\');',
+        '    public function remove($db, ' + ', '.join(args) + ') {',
+        '        $stmt = $db->prepare(\'' + sql.replace("'", "\\'") + '\');',
+        '        $data = array(',
+    ]
+
+    for c in analysis_obj.primary_key_columns:
+        ret.append('            "' + c.sql_name + '" => $' + c.sql_name + ',')
+
+    ret.extend([
+        '        );',
         '        $stmt->execute($data);',
         '        if ($this->checkForErrors($db)) { return false; }',
-        '        return true;',
+        '        return $stmt->rowCount();',
         '    }'
         '',
-    ]
+    ])
 
     return ret
 
 
-def generate_validations(table_validations, processed_columns):
-    assert isinstance(processed_columns, ProcessedColumnSet)
+def generate_validations(analysis_obj):
+    assert isinstance(analysis_obj, sqlmigration.codegen.ColumnSetAnalysis)
 
     table_validates = [
         '',
@@ -575,27 +583,36 @@ def generate_validations(table_validations, processed_columns):
     # Always run the validation, by having it appear before the '&& $ret',
     # so that the parent class can collect all of the validation errors.
 
-    for v in processed_columns.php_read:
-        assert isinstance(v, ProcessedPhpValidationConstraint)
-        read_validates.append('        $ret = $this->validate' + v.order_name +
-                              '($row) && $ret;')
-        ret.extend(generate_validation(v))
-    for v in processed_columns.php_write:
-        assert isinstance(v, ProcessedPhpValidationConstraint)
-        write_validates.append('        $ret = $this->validate' + v.order_name +
-                               '($row) && $ret;')
-        ret.extend(generate_validation(v))
-    for v in processed_columns.php_validation:
-        assert isinstance(v, ProcessedPhpValidationConstraint)
-        write_validates.append('        $ret = $this->validate' + v.order_name +
-                               '($row) && $ret;')
-        ret.extend(generate_validation(v))
 
-    for validation in table_validations:
-        assert isinstance(validation, ProcessedPhpValidationConstraint)
-        table_validates.append('        $ret = $this->validate' +
-                               validation.order_name + '($row) && $ret;')
-        ret.extend(generate_validation(validation))
+
+    # FIXME --------------------------------------------------------
+    # FIXME --------------------------------------------------------
+    # FIXME --------------------------------------------------------
+    # FIXME --------------------------------------------------------
+    # FIXME --------------------------------------------------------
+    # FIXME all below here
+
+    #for v in processed_columns.php_read:
+    #    assert isinstance(v, ProcessedPhpValidationConstraint)
+    #    read_validates.append('        $ret = $this->validate' + v.order_name +
+    #                          '($row) && $ret;')
+    #    ret.extend(generate_validation(v))
+    #for v in processed_columns.php_write:
+    #    assert isinstance(v, ProcessedPhpValidationConstraint)
+    #    write_validates.append('        $ret = $this->validate' + v.order_name +
+    #                           '($row) && $ret;')
+    #    ret.extend(generate_validation(v))
+    #for v in processed_columns.php_validation:
+    #    assert isinstance(v, ProcessedPhpValidationConstraint)
+    #    write_validates.append('        $ret = $this->validate' + v.order_name +
+    #                           '($row) && $ret;')
+    #    ret.extend(generate_validation(v))
+    #
+    #for validation in table_validations:
+    #    assert isinstance(validation, ProcessedPhpValidationConstraint)
+    #    table_validates.append('        $ret = $this->validate' +
+    #                           validation.order_name + '($row) && $ret;')
+    #    ret.extend(generate_validation(validation))
 
     table_validates.extend(['        return $this->finalCheck($ret);', '    }',
                             ''])
