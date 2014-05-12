@@ -44,7 +44,8 @@ def generate_file(analysis_obj):
             ' */',
             'class ' + class_name + ' extends ' + parent_class + ' {',
             '    public static $INSTANCE;',
-            '    public $errors = array();', '',
+            '    public $errors = array();',
+            '    public $errnos = array();', '',
         ])
         f.write('\n'.join(generate_read(analysis_obj)))
 
@@ -65,8 +66,9 @@ def generate_file(analysis_obj):
             '',
             '    private function checkForErrors($db) {',
             '        $errs = $db->errorInfo();',
-            '        if ($errs[1] != null) {',
+            '        if ($errs[1] !== null) {',
             '            $errors[] = $errs[2];',
+            '            $errnos[] = $errs[1];',
             '        }',
             '        return false;',
             '    }', '',
@@ -79,7 +81,8 @@ def generate_file(analysis_obj):
 def generate_read(analysis_obj):
     assert isinstance(analysis_obj, sqlmigration.codegen.ColumnSetAnalysis)
 
-    read_data = sqlmigration.codegen.ReadQueryData(analysis_obj, PLATFORMS)
+    read_data = sqlmigration.codegen.ReadQueryData(analysis_obj, PLATFORMS,
+                                                   'php')
     default_order_by = None
     always_order_by_clause = ' '
     if len(analysis_obj.primary_key_columns) == 1:
@@ -294,54 +297,13 @@ def generate_create(analysis_obj):
     assert isinstance(analysis_obj, sqlmigration.codegen.ColumnSetAnalysis)
     assert not analysis_obj.is_read_only
 
-    columns = analysis_obj.columns_for_create
-    php_default_argument_list = []
-    php_required_argument_list = []
-    hard_coded_column_names = []
-    hard_coded_column_values = []
-    default_column_arguments = []
-    auto_gen_columns = []
+    create_data = sqlmigration.codegen.CreateQuery(analysis_obj, PLATFORMS,
+                                                   'php')
 
-    # Auto-generated columns are never ones specified for create
-    for c in analysis_obj.columns_analysis:
-        if c.auto_gen:
-            auto_gen_columns.append(c.sql_name)
-
-    for c in columns:
-
-        if c.allows_create:
-            arguments = c.create_arguments
-            if c.default_value is not None:
-                php_default_argument_list.extend(arguments)
-                default_column_arguments.append([c.sql_name, arguments])
-
-            elif c.create_value is not None:
-                cv = c.create_value.constraint
-                # TODO In the future, this could be code
-                assert isinstance(
-                    cv, sqlmigration.model.SqlConstraint)
-
-                php_required_argument_list.extend(arguments)
-                hard_coded_column_names.append(c.sql_name)
-
-                cv_sql = cv.sql_args(PLATFORMS, lambda a: ':' + a)
-                assert cv_sql is not None
-                hard_coded_column_values.append(cv_sql)
-
-            elif len(arguments) > 0:
-                # "arguments" should match the column name
-                assert len(arguments) == 1
-                php_required_argument_list.extend(arguments)
-                hard_coded_column_names.append(
-                    c.sql_name)
-                hard_coded_column_values.extend(':' + a for a in arguments)
-
-            else:
-                raise Exception("bad state")
-
-    php_argument_list = [('$' + a) for a in php_required_argument_list]
-    php_argument_list.extend([
-        ('$' + a + ' = false') for a in php_default_argument_list])
+    php_argument_list = [('$' + a)
+                         for a in create_data.required_input_arguments]
+    php_argument_list.extend([('$' + a + ' = false')
+                              for a in create_data.optional_input_arguments])
 
     # we can have no arguments if the table is essentially just an ID.
     php_argument_str = ''
@@ -352,60 +314,147 @@ def generate_create(analysis_obj):
         '',
         '    public function create($db' + php_argument_str + ') {',
         '        $sql = \'INSERT INTO ' + analysis_obj.sql_name + ' (' +
-        ', '.join(hard_coded_column_names) + '\';',
-        '        $values = \') VALUES (' +
-        ', '.join(hard_coded_column_values) + '\';',
+        # FIXME escape the php string
+        ', '.join(c.column_name for c in create_data.required_input_values) +
+        '\';',
+        '        $values = \'' + (', '.join(
+            # FIXME escape the php string
+            c.get_sql_value(True) for c in create_data.required_input_values)) +
+        '\';',
     ]
-    if len(php_required_argument_list) <= 0:
+    if len(create_data.required_input_values) <= 0:
         ret.append('        $has_columns = false;')
 
-    ret.extend([
-        '        $data = array(',
-    ])
+    has_where = False
+    for r in create_data.where_values.values():
+        if len(r) > 0:
+            has_where = True
+            break
 
-    for r in php_required_argument_list:
-        ret.append('            \'' + r + '\' => $' + r + ',')
+    if has_where:
+        ret.append('        $where = " WHERE 1 = 1";')
+
+    data_values = [
+        '        $data = array(',
+    ]
+    for r in create_data.required_input_values:
+        assert isinstance(r, sqlmigration.codegen.InputValue)
+        code = r.get_code_value(True)
+        if code is not None:
+            ret.append(code)
+        for arg in r.get_sql_arguments(True):
+            data_values.append('            \'' + arg + '\' => $' + arg + ',')
+
+        for wr in create_data.where_values[r]:
+            assert isinstance(wr, sqlmigration.codegen.InputValue)
+            code = wr.get_code_value(True)
+            if code is not None:
+                ret.append(code)
+            for arg in wr.get_sql_arguments(True):
+                data_values.append('            \'' + arg + '\' => $' + arg +
+                                   ',')
+            ret.append('        $where .= \' AND ' + wr.get_sql_value(True) +
+                       '\';')
+
+    ret.extend(data_values)
     ret.append('        );')
 
-    # FIXME default value could be a sql syntax with 0 or more arguments.
-    for r in php_default_argument_list:
-        ret.extend([
-            '        if ($' + r + ' !== false) {',
-            '            $data[\'' + r + '\'] = $' + r + ';',
-        ])
-        if len(php_required_argument_list) <= 0:
-            ret.extend([
-                '            if (! $has_columns) {',
-                '                $has_columns = true;',
-                '            } else {',
-                '                $sql .= \', \';',
-                '                $values .= \', \';',
-                '            }',
+    for r in create_data.optional_input_values:
+        assert isinstance(r, sqlmigration.codegen.InputValue)
+        arguments = create_data.value_arguments[r]
+        assert arguments is not None and len(arguments) > 0
+        s1 = ['$' + a + ' !== false' for a in arguments]
+        s2 = []
+        s3 = []
+        code = r.get_code_value(True)
+        if code is not None:
+            s2.append(code)
+        code = r.get_code_value(False)
+        if code is not None:
+            s3.append(code)
+        for a in r.get_sql_arguments(True):
+            s2.append('            $data[\'' + a + '\'] = $' + a + ';')
+            if len(create_data.required_input_values) <= 0:
+                s2.extend([
+                    '            if (! $has_columns) {',
+                    '                $has_columns = true;',
+                    '            } else {',
+                    '                $sql .= \', \';',
+                    '                $values .= \', \';',
+                    '            }',
+                ])
+            s2.extend([
+                '                $sql .= \', ' + r.column_name + '\';',
+                '                $values .= \', ' +
+                r.get_sql_value(True) + '\';',
             ])
-        # FIXME default value could potentially be a sql syntax.
-        ret.extend([
-            '            $sql .= \'' + r + '\';',
-            '            $values .= \':' + r + '\';',
-            '        }',
-        ])
+        for a in r.get_sql_arguments(False):
+            s3.append('            $data[\'' + a + '\'] = $' + a + ';')
+            if len(create_data.required_input_values) <= 0:
+                s3.extend([
+                    '            if (! $has_columns) {',
+                    '                $has_columns = true;',
+                    '            } else {',
+                    '                $sql .= \', \';',
+                    '                $values .= \', \';',
+                    '            }',
+                ])
+            s3.extend([
+                '                $sql .= \', ' + r.column_name + '\';',
+                '                $values .= \', ' +
+                r.get_sql_value(False) + '\';',
+            ])
+
+        for wr in create_data.where_values[r]:
+            assert isinstance(wr, sqlmigration.codegen.InputValue)
+            code = wr.get_code_value(True)
+            if code is not None:
+                s2.append(code)
+            for arg in wr.get_sql_arguments(True):
+                s2.append('            $data[\'' + arg + '\'] = $' + arg + ';')
+            sv = wr.get_sql_value(True)
+            if sv is not None:
+                s2.append('        $where .= \' AND ' + sv + '\';')
+
+            code = wr.get_code_value(False)
+            if code is not None:
+                s3.append(code)
+            for arg in wr.get_sql_arguments(False):
+                s3.append('            $data[\'' + arg + '\'] = $' + arg + ';')
+            sv = wr.get_sql_value(False)
+            if sv is not None:
+                s3.append('        $where .= \' AND ' + sv + '\';')
+
+        ret.append('        if (' + (' && '.join(s1)) + ') {')
+        ret.extend(s2)
+        if len(s3) > 0:
+            ret.append('        } else { ')
+            ret.extend(s3)
+        ret.append('        }')
 
     ret.extend([
         '        if (! $this->validateWrite($data)) {',
-        '            return False;',
+        '            return false;',
         '        }',
-        '        $stmt = $db->prepare($sql . $values . \')\');',
+    ])
+
+    if has_where:
+        ret.append('        $sql .= \') SELECT \'.$values.$where;')
+    else:
+        ret.append('        $sql .= \') VALUES (\'.$values.\')\';')
+
+    ret.extend([
+        '        $stmt = $db->prepare($sql);',
         '        $stmt->execute($data);',
         '        if ($this->checkForErrors($db)) { return false; }',
     ])
 
-    for col_name in auto_gen_columns:
-        ret.extend([
-            '        $id = $db->lastInsertId();',
-            '        $data["' + col_name + '"] = $id;',
-        ])
+    if create_data.generated_column_name is not None:
+        ret.append('        return $db->lastInsertId();')
+    else:
+        ret.append('        return true;')
 
     ret.extend([
-        '        return $data;',
         '    }',
         ''
     ])
@@ -415,6 +464,8 @@ def generate_create(analysis_obj):
 
 def generate_update(analysis_obj):
     assert isinstance(analysis_obj, sqlmigration.codegen.ColumnSetAnalysis)
+
+    # TODO replace with UpdateQuery
 
     column_name_values = {}
     required_argument_names = []

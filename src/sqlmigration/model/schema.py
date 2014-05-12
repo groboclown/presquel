@@ -192,6 +192,13 @@ class LanguageConstraint(Constraint):
     def arguments(self):
         return self.__arguments
 
+    def code_for_language(self, language):
+        # FIXME eventually, this should allow sub-languages under it.
+        if language != self.language:
+            raise Exception("unsupported langauge " + language +
+                            " for constraint")
+        return self.code
+
 
 class NamedConstraint(Constraint):
     def __init__(self, order, comment, constraint_type, column_names, details,

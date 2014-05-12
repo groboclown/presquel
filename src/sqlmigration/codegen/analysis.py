@@ -279,7 +279,6 @@ class ColumnSetAnalysis(SchemaAnalysis):
                 ret.append([c.schema, v])
         return ret
 
-
     @property
     def top_read_validations(self):
         """
@@ -387,7 +386,10 @@ class ColumnAnalysis(SchemaAnalysis):
                 len(self.default_value.arguments) <= 0)
         self.auto_gen = column.auto_increment
         self.update_value = None
+        self.update_required = False
         self.create_value = None
+        self.create_restrictions = []
+        self.update_restrictions = []
         self.read_value = None
         self.constraints = []
         self.foreign_key = None
@@ -424,7 +426,8 @@ class ColumnAnalysis(SchemaAnalysis):
                 self.is_read = False
             elif c.constraint.constraint_type == 'constantquery':
                 self.read_value = c
-            elif c.constraint.constraint_type == 'constantupdate':
+            elif c.constraint.constraint_type in [
+                    'constantupdate', 'updatevalue']:
                 self.update_value = c
             elif c.constraint.constraint_type == 'restrictquery':
                 self.query_restrictions.append(c)
@@ -434,6 +437,16 @@ class ColumnAnalysis(SchemaAnalysis):
                 self.is_nullable = False
             elif c.constraint.constraint_type in ['validatewrite', 'validate']:
                 self.write_validations.append(c)
+            elif c.constraint.constraint_type == 'valuerestriction':
+                self.create_restrictions.append(c)
+                self.update_restrictions.append(c)
+            elif c.constraint.constraint_type == 'createrestriction':
+                self.create_restrictions.append(c)
+            elif c.constraint.constraint_type == 'updaterestriction':
+                self.update_restrictions.append(c)
+            elif c.constraint.constraint_type in [
+                    'updaterequired', 'requiredupdate']:
+                self.update_required = True
 
         self.read_by = self.read_by and self.is_read
 
