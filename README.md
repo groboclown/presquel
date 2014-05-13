@@ -290,22 +290,19 @@ that.
 
 This is still an early-development tool.  Here's the current todo list.
 
-* Add support for cross-column constraints in the sql generation.
 * Add code generation automatic method creation for any index (table or column).
- These are already created automatically for foreign keys.
-* Eliminate automatic join logic on foreign keys; this needs to be done with
- views instead.
-* Add support for implicit trigger creation via constraints.
-* Ensure the Dewey Decimal versioning system works as expected.
-* Add version info files to indicate previous version.
+ These exist for the read methods, but should be added for update and delete.
 * Add optional where clause support to the format and code generation.  These
  should be implemented as individual objects (each clause) that are passed
  into the methods.
+* Ensure the Dewey Decimal versioning system works as expected.
+* Add version info files to indicate previous version.
 * Add change syntax support.
 * Add change sql generation.
 * Add the version copy tool.
 * Add XML and JSon parsers.  These should be nearly trivial to add.
 * Complete this documentation.
+* Add support for implicit trigger creation via constraints.
 * Add support for postgres, oracle, and sql server.
 
 

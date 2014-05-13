@@ -505,7 +505,7 @@ def generate_update(analysis_obj):
                     always_column_names.append(column.sql_name)
 
             else:
-                column_name_values[column.sql_name] = column.sql_name
+                column_name_values[column.sql_name] = ':' + column.sql_name
                 optional_col_args.append([column.sql_name, [column.sql_name]])
                 optional_argument_names.append(column.sql_name)
 
@@ -550,7 +550,7 @@ def generate_update(analysis_obj):
             '                $sql .= ", ";',
             '            }',
             '            $set_count++;',
-            '            $sql .= "' + n[0] + ' = :' +
+            '            $sql .= "' + n[0] + ' = ' +
             column_name_values[n[0]] + '";',
         ])
         for anx in n[1]:

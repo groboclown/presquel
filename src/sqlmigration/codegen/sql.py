@@ -371,7 +371,11 @@ class UpdateQuery(UpdateCreateQuery):
     """
     def __init__(self, analysis_obj, platforms, language):
         UpdateCreateQuery.__init__(self, analysis_obj, platforms, language)
-        pass
+        self.primary_key_columns = []
+        for c in analysis_obj.columns_analysis:
+            assert isinstance(c, ColumnAnalysis)
+            if c.is_primary_key:
+                self.primary_key_columns.append(c)
 
     def _get_columns_for(self, analysis_obj):
         assert isinstance(analysis_obj, ColumnSetAnalysis)
@@ -379,7 +383,7 @@ class UpdateQuery(UpdateCreateQuery):
 
     def _create_values(self, column, platforms, language, is_where_clause):
         assert isinstance(column, ColumnAnalysis)
-        is_required = column.update_required
+        is_required = column.update_required or column.is_primary_key
 
         if is_where_clause:
             values = column.update_restrictions
