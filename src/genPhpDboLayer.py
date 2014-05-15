@@ -249,7 +249,7 @@ def generate_read(analysis_obj):
         ])
         ret.extend(setup_code)
         ret.extend([
-            '        $stmt->execute(array(' + args + '));',
+            '        $stmt->execute($data);',
             '        if ($this->checkForErrors($db)) { return false; }',
             '        return $stmt->fetchColumn();',
             '    }', '' '',
@@ -332,7 +332,8 @@ def generate_create(analysis_obj):
             break
 
     if has_where:
-        ret.append('        $where = " WHERE 1 = 1";')
+        ret.append('        $where = " FROM ' + analysis_obj.sql_name +
+                   ' WHERE 1 = 1";')
 
     data_values = [
         '        $data = array(',
