@@ -679,7 +679,8 @@ def generate_validations(analysis_obj):
 
 
 def generate_validation(validation):
-    assert isinstance(validation, ProcessedPhpValidationConstraint)
+    assert isinstance(validation, sqlmigration.codegen.LanguageConstraint)
+    assert validation.language == 'php'
 
     ret = [
         '',
