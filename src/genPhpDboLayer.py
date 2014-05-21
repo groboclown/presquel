@@ -14,6 +14,12 @@ schema_by_name = {}
 
 PLATFORMS = ['mysql']
 
+# TODO create the where clause objects within the file.
+# TODO add extended sql functions.
+# TODO make the return value be more robust - make it an "object" where it
+#    has whether it was an error or not, and row count (if applicable),
+#    generated IDs, and so on.
+
 
 def generate_file(analysis_obj):
     assert isinstance(analysis_obj, sqlmigration.codegen.ColumnSetAnalysis)
