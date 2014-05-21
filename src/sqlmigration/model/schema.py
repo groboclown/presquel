@@ -155,14 +155,7 @@ class SqlConstraint(Constraint):
         :param arg_converter:
         :return:
         """
-        ret = self.sql.get_for_platform(platforms)
-        if ret is None:
-            return None
-        ret = ret.sql
-        for a in self.arguments:
-            ret = ret.replace('{' + a + '}', arg_converter(a))
-        return ret
-
+        return self.sql.sql_args(platforms, arg_converter)
 
     @property
     def arguments(self):
@@ -279,21 +272,78 @@ class Column(SchemaObject):
         return self.__constraints
 
 
-class Table(SchemaObject):
+class WhereClause(object):
+    """
+    Extra where clauses that can be optionally added to the code.  These
+    can be chained together with AND or OR statements.
+    """
+    def __init__(self, name, sqlset):
+        """
+        :param SqlSet sqlset:
+        :param str name:
+        """
+        assert isinstance(name, str)
+        assert isinstance(sqlset, SqlSet)
+        self.__name = name
+        self.__sqlset = sqlset
+    
+    @property
+    def name(self):
+        return self.__name
+    
+    @property
+    def sql(self):
+        return self.__sqlset
 
-    # TODO support clustered indicies and other custom constraints on the
-    # table as a whole.
 
-    def __init__(self, order, comment, catalog_name, schema_name, table_name,
-                 table_space, columns, table_constraints, changes):
-        SchemaObject.__init__(self, table_name, order, comment, TABLE_TYPE,
+class ExtendedSql(object):
+    """
+    Defines extra Sql statements that should be added to the generated code.
+    """
+    def __init__(self, name, sql_type, sqlset):
+        """
+        :param str name:
+        :param str sql_type: the type of sql being performed in the operation
+                (query, insert, update, delete, other)
+        :param SqlSet sqlset:
+        """
+        assert isinstance(name, str)
+        assert isinstance(sql_type, str)
+        assert isinstance(sqlset, SqlSet)
+        
+        self.__name = name
+        self.__sql_type = sql_type
+        self.__sqlset = sqlset
+    
+    @property
+    def name(self):
+        return self.__name
+    
+    @property
+    def sql_type(self):
+        return self.__sql_type
+    
+    @property
+    def sql(self):
+        return self.__sqlset
+
+
+class ColumnarSchemaObject(SchemaObject):
+    """
+    A schema type that has columns.  This includes tables, views, and stored
+    procedures that return tables.
+    """
+    def __init__(self, order, comment, catalog_name, schema_name, name,
+                 columns, top_constraints, object_type, changes,
+                 where_clauses, extended_sql):
+        SchemaObject.__init__(self, name, order, comment, object_type,
                               changes)
         self.__catalog_name = catalog_name
         self.__schema_name = schema_name
-        self.__table_name = table_name
-        self.__table_space = table_space
         self.__columns = columns
-        self.__table_constraints = table_constraints
+        self.__top_constraints = top_constraints
+        self.__where_clauses = where_clauses
+        self.__extended_sql = extended_sql
 
     @property
     def catalog_name(self):
@@ -302,6 +352,45 @@ class Table(SchemaObject):
     @property
     def schema_name(self):
         return self.__schema_name
+
+    @property
+    def columns(self):
+        return self.__columns
+
+    @property
+    def constraints(self):
+        return self.__top_constraints
+    
+    @property
+    def where_clauses(self):
+        """
+        :return list(WhereClause):
+        """
+        return self.__where_clauses
+    
+    @property
+    def extended_sql(self):
+        """
+        :return list(SqlSet):
+        """
+        return self.__extended_sql
+
+    @property
+    def sub_schema(self):
+        ret = [self.columns]
+        ret.extend(self.constraints)
+        return ret
+
+
+class Table(ColumnarSchemaObject):
+
+    def __init__(self, order, comment, catalog_name, schema_name, table_name,
+                 table_space, columns, table_constraints, changes,
+                 where_clauses, extended_sql):
+        SchemaObject.__init__(self, table_name, order, comment, TABLE_TYPE,
+                              changes, where_clauses, extended_sql)
+        self.__table_name = table_name
+        self.__table_space = table_space
 
     @property
     def table_name(self):
@@ -311,45 +400,21 @@ class Table(SchemaObject):
     def table_space(self):
         return self.__table_space
 
-    @property
-    def columns(self):
-        return self.__columns
 
-    @property
-    def constraints(self):
-        return self.__table_constraints
-
-    @property
-    def sub_schema(self):
-        return self.columns
-
-
-class View(SchemaObject):
+class View(ColumnarSchemaObject):
     def __init__(self, order, comment, catalog_name, replace_if_exists,
                  schema_name, view_name, select_query, columns,
-                 table_constraints, changes):
+                 table_constraints, changes, where_clauses, extended_sql):
         SchemaObject.__init__(self, view_name, order, comment, VIEW_TYPE,
-                              changes)
+                              changes, where_clauses, extended_sql)
         assert isinstance(select_query, SqlSet)
-        self.__catalog_name = catalog_name
         self.__replace_if_exists = replace_if_exists
-        self.__schema_name = schema_name
         self.__view_name = view_name
         self.__select_query = select_query
-        self.__table_constraints = table_constraints
-        self.__columns = columns
-
-    @property
-    def catalog_name(self):
-        return self.__catalog_name
 
     @property
     def replace_if_exists(self):
         return self.__replace_if_exists
-
-    @property
-    def schema_name(self):
-        return self.__schema_name
 
     @property
     def view_name(self):
@@ -362,18 +427,6 @@ class View(SchemaObject):
         :return: SqlSet
         """
         return self.__select_query
-
-    @property
-    def columns(self):
-        return self.__columns
-
-    @property
-    def constraints(self):
-        return self.__table_constraints
-
-    @property
-    def sub_schema(self):
-        return self.columns
 
 
 class Sequence(SchemaObject):

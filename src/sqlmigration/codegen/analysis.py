@@ -324,7 +324,7 @@ class ColumnSetAnalysis(SchemaAnalysis):
             assert isinstance(con, AbstractProcessedConstraint)
             ret = [self.get_column_analysis(cn)
                    for cn in con.constraint.column_names]
-        return ret
+        return ret or []
 
     @property
     def columns_for_read(self):

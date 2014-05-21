@@ -4,7 +4,7 @@ from ..model import (SCHEMA_OBJECT_TYPES, CHANGE_TYPES,
                      TABLE_TYPE, Table,
                      VIEW_TYPE, View, CONSTRAINT_TYPE, COLUMN_TYPE,
                      Column, SqlConstraint, LanguageConstraint, Constraint,
-                     NamedConstraint,
+                     NamedConstraint, WhereClause, ExtendedSql,
                      ValueTypeValue, SqlString, SqlSet)
 
 
@@ -277,6 +277,8 @@ class SchemaParser(object):
         table_obj = NameSpaceObjectBuilder(self, ['tablename'], TABLE_TYPE,
                                            False)
         columns = []
+        wheres = []
+        extended = []
 
         for (k, v) in d.items():
             k = _strip_key(k)
@@ -288,6 +290,12 @@ class SchemaParser(object):
             elif k == 'columns':
                 for ch in self.fetch_dicts_from_list(k, v, 'column'):
                     columns.append(self._parse_column(ch))
+            elif k in ['wheres', 'whereclauses']:
+                for ch in self.fetch_dicts_from_list(k, v, 'where'):
+                    wheres.append(self._parse_where(ch))
+            elif k in ['extendedactions', 'extendedsql', 'extendsql', 'extend']:
+                for ch in self.fetch_dicts_from_list(k, v, 'sql'):
+                    extended.append(self._parse_extended_sql(ch))
             else:
                 self.error("unknown key (" + k + ") set to " + repr(v))
 
@@ -295,7 +303,8 @@ class SchemaParser(object):
         return Table(table_obj.order, table_obj.comment,
                      table_obj.catalog_name, table_obj.schema_name,
                      table_obj.name, table_obj.table_space, columns,
-                     table_obj.constraints, table_obj.changes)
+                     table_obj.constraints, table_obj.changes,
+                     wheres, extended)
 
     def _parse_view(self, d):
         assert isinstance(d, dict)
@@ -304,6 +313,8 @@ class SchemaParser(object):
         replace_if_exists = True
         sql_set = []
         columns = []
+        wheres = []
+        extended = []
 
         for (k, v) in d.items():
             k = _strip_key(k)
@@ -330,6 +341,12 @@ class SchemaParser(object):
             elif k == 'columns':
                 for ch in self.fetch_dicts_from_list(k, v, 'column'):
                     columns.append(self._parse_column(ch))
+            elif k in ['wheres', 'whereclauses']:
+                for ch in self.fetch_dicts_from_list(k, v, 'where'):
+                    wheres.append(self._parse_where(ch))
+            elif k in ['extendedactions', 'extendedsql', 'extendsql', 'extend']:
+                for ch in self.fetch_dicts_from_list(k, v, 'sql'):
+                    extended.append(self._parse_extended_sql(ch))
             else:
                 self.error("unknown key (" + k + ") set to " + repr(v))
 
@@ -337,7 +354,7 @@ class SchemaParser(object):
         return View(view_obj.order, view_obj.comment, view_obj.catalog_name,
                     replace_if_exists, view_obj.schema_name, view_obj.name,
                     SqlSet(sql_set), columns, view_obj.constraints,
-                    view_obj.changes)
+                    view_obj.changes, wheres, extended)
 
     def _parse_procedure(self, d):
         raise Exception("not implemented")
@@ -443,6 +460,62 @@ class SchemaParser(object):
                       value, default_value, auto_increment, remarks,
                       before_column, after_column, position, constraints,
                       changes)
+    
+    def _parse_where(self, d):
+        assert isinstance(d, dict)
+
+        name = None
+        sql_set = None
+        
+        for  (k, v) in d.items():
+            k = _strip_key(k)
+            if k == 'dialects':
+                ss = []
+                for ch in self.fetch_dicts_from_list(k, v, 'dialect'):
+                    sql = SqlStatementBuilder()
+                    ss.append(sql.make(ch))
+                sql_set = SqlSet(ss)
+            elif k == 'sql' or k == 'value':
+                ch = {
+                    'syntax': 'universal',
+                    'platforms': 'all',
+                    'sql': v
+                }
+                sql = SqlStatementBuilder()
+                sql_set = SqlSet([sql.make(ch)])
+            else:
+                self.error("unknown key (" + k + ") set to " + repr(v))
+        
+        return WhereClause(name, sql_set)
+
+    def _parse_extended_sql(self, d):
+        assert isinstance(d, dict)
+
+        name = None
+        sql_set = None
+        sql_type = None
+        
+        for (k, v) in d.items():
+            if k in ['schematype', 'type', 'operation']:
+                assert isinstance(v, str)
+                sql_type
+            elif k == 'dialects':
+                for ch in self.fetch_dicts_from_list(
+                        k, v, ['dialect']):
+                    sql = SqlStatementBuilder()
+                    sql_set.append(sql.make(ch))
+            elif k in ['statement', 'sql', 'query', 'execute']:
+                ch = {
+                    'syntax': 'universal',
+                    'platforms': 'all',
+                    'sql': v
+                }
+                sql = SqlStatementBuilder()
+                sql_set.append(sql.make(ch))
+            else:
+                self.error("unknown key (" + k + ") set to " + repr(v))
+        
+        return ExtendedSql(name, sql_type, sql_set)
 
     def parse_constraint(self, parent_column, d):
         assert isinstance(d, dict)
