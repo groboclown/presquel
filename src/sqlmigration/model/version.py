@@ -2,6 +2,7 @@
 Manages the different versions of the schema.
 """
 
+from .schema import (SchemaObject)
 
 class SchemaVersion(object):
     """
@@ -18,6 +19,7 @@ class SchemaVersion(object):
 
         if not isinstance(version, int):
             raise Exception('"version" must be int, found ' + repr(version))
+        assert isinstance(schema, list) or isinstance(schema, tuple)
         self.__version = version
         self.__top_changes = sorted(top_changes)
         self.__schema = sorted(schema)
@@ -32,6 +34,8 @@ class SchemaVersion(object):
 
     @property
     def schema(self):
+        for s in self.__schema:
+            assert isinstance(s, SchemaObject)
         return self.__schema
 
     def __lt__(self, version):

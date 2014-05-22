@@ -13,6 +13,7 @@ output_dir = None
 schema_by_name = {}
 
 PLATFORMS = ['mysql']
+PREPSQL_CONVERTER = lambda a: ':' + a
 
 # TODO create the where clause objects within the file.
 # TODO add extended sql functions.
@@ -35,13 +36,62 @@ def generate_file(analysis_obj):
         uses = 'use ' + parent_class[0: parent_class.find('\\')] + ';'
 
     with open(file_name, 'w') as f:
-        f.writelines(line + '\n' for line in [
+        f.writelines('\n'.join([
             '<?php',
             '',
             'namespace ' + namespace + ';',
             '',
             'use PDO;',
             uses,
+            '',
+        ]))
+        
+        if len(analysis_obj.schema.where_clauses) > 0:
+            f.writelines('\n'.join([
+                '', '',
+                'class ' + class_name + '__WhereParent {',
+                '    public function bindVariables($data) {}',
+                '}',
+                '', ''
+            ]))
+        
+        for w in analysis_obj.schema.where_clauses:
+            assert isinstance(w, sqlmigration.model.WhereClause)
+            f.writelines('\n'.join([
+                '', '',
+                '/**',
+                ' * Where clause for ' + sql_name,
+                ' */',
+                'class ' + class_name + '_' + generate_php_name(w.name) +
+                ' extends ' + class_name + '__WhereParent {',
+                ''
+            ]))
+            
+            if len(w.arguments) > 0:
+                for a in w.arguments:
+                    f.writeline('    public $' + a + ';\n')
+                f.writeline('    function __construct(' +
+                    (', '.join(('$' + a) for a in w.arguments)) + ') {\n')
+                for a in w.arguments:
+                    f.writeline('        $this->' + a + ' = $' + a + ';\n')
+                f.writeline('    }\n')
+            f.writelines('\n'.join([
+                '', '',
+                '    public function bindVariables($data) {',
+            ]))
+            for a in w.arguments:
+                f.writeline('        $data["' + a + '"] = $this->' + a + ';\n')
+            f.writelines('\n'.join([
+                '    }', '', ''
+                '    public function __toString() {',
+                '        return \'' +
+                sqlmigration.codegen.php.escape_php_string(
+                       w.sql_args(PLATFORMS, PREPSQL_CONVERTER)) + '\';'
+                '    }', '',
+                '}', ''
+            ]))
+        
+        f.writelines('\n'.join([
             '', '',
             '/**',
             ' * DBO object for ' + sql_name,
@@ -49,34 +99,41 @@ def generate_file(analysis_obj):
             ' * Generated on ' + time.asctime(time.gmtime(time.time())),
             ' */',
             'class ' + class_name + ' extends ' + parent_class + ' {',
-            '    public static $INSTANCE;',
-            '    public $errors = array();',
-            '    public $errnos = array();', '',
-        ])
+            '    public static $INSTANCE;', '',
+        ]))
         f.write('\n'.join(generate_read(analysis_obj)))
 
         if not analysis_obj.is_read_only:
-            #print("Not read only: " + analysis_obj.sql_name)
             f.writelines('\n'.join(generate_create(analysis_obj)))
             f.writelines((line + '\n') for line in generate_update(
                 analysis_obj))
-            # FIXME
             f.writelines(line + '\n' for line in generate_delete(
                 analysis_obj))
+        
+        # FIXME add extended sql creation
+        
 
-        # FIXME
-        f.writelines((line + '\n') for line in generate_validations(
-            analysis_obj))
+        f.writelines('\n'.join(generate_validations(
+            analysis_obj)))
 
         f.write('\n'.join([
             '',
-            '    private function checkForErrors($db) {',
-            '        $errs = $db->errorInfo();',
+            '    private function createReturn($stmt, $extractor) {',
+            '        $errs = $stmt->errorInfo();',
+            '        $ret = array("haserror" => false, "rowcount" => 0, ' +
+            '"success" => true, "result" => null);',
             '        if ($errs[1] !== null) {',
-            '            $errors[] = $errs[2];',
-            '            $errnos[] = $errs[1];',
+            '            $ret["haserror"] = true;',
+            '            $ret["success"] = false;',
+            '            $ret["error"] = $errs[2];',
+            '            $ret["errorcode"] = $errs[1];',
+            '        } else {',
+            '            $ret["rowcount"] = $stmt->rowCount();',
+            '            $ret["result"] = $extractor($stmt);',
             '        }',
-            '        return false;',
+            # FIXME is there a close statement to run?
+            '        //$stmt->close();',
+            '        return $ret;',
             '    }', '',
             '}',
             class_name + '::$INSTANCE = new ' + class_name + ';',
@@ -101,30 +158,43 @@ def generate_read(analysis_obj):
     if len(read_data.arguments) > 0:
         arg_names = [('$' + a) for a in read_data.arguments]
         arg_arg = ', ' + ', '.join(arg_names)
+    
+    where_arg = ''
+    if len(analysis_obj.schema.where_clauses) > 0:
+        where_arg = ', $whereClauses = null'
 
+    # FIXME add where clause support
     ret = [
         '',
         '    /**',
         '     * Returns the number of rows in the table.',
         '     */',
-        '    public function countAll($db) {',
-        '        $stmt = $db->prepare(\'SELECT COUNT(*) FROM ' +
-        analysis_obj.sql_name + '\');',
-        '        $stmt->execute();',
-        '        if ($this->checkForErrors($db)) { return false; }',
-        '        return intval($stmt->fetchColumn());',
-        '    }', ''
+        '    public function countAll($db' + where_arg + ') {',
+        '        $sql = \'SELECT COUNT(*) FROM ' + analysis_obj.sql_name +
+        '\';',
+        '        $data = array();',
     ]
+    ret.extend(generate_where_clause(analysis_obj, False))
+    ret.extend([
+        '        $stmt = $db->prepare($data);',
+        '        $stmt->execute($data);',
+        '        return $this->createReturn($stmt, function ($s) {',
+        '            return intval($s->fetchColumn());',
+        '        });',
+        '    }', ''
+    ])
 
-    # This should eventually allow for adding where clause arguments.
     ret.extend([
         '',
         '    /**',
         '     * Reads the row data without filters.',
         '     */',
-        '    public function readAll($db' + arg_arg +
+        '    public function readAll($db' + arg_arg + where_arg +
         ', $order = false, $start = -1, $end = -1) {',
-        '        $sql = \'' + escaped_sql + always_order_by_clause + '\';',
+        '        $sql = \'' + escaped_sql + '\';',
+    ])
+    ret.extend([
+        '        $sql .= \'' + always_order_by_clause + '\';'
     ])
     if len(arg_names) > 0:
         ret.append('        $data = array(')
@@ -134,6 +204,8 @@ def generate_read(analysis_obj):
         ret.append('        );')
     else:
         ret.append('        $data = array();')
+    if len(analysis_obj.schema.where_clauses) > 0:
+        ret.extend(generate_where_clause(analysis_obj, False))
     order_code = []
     if default_order_by is not None:
         order_code.extend([
@@ -157,31 +229,32 @@ def generate_read(analysis_obj):
         '        $stmt = $db->prepare($sql);',
         '        $stmt->setFetchMode(PDO::FETCH_ASSOC);',
         '        $stmt->execute($data);',
-        '        if ($this->checkForErrors($db)) { return false; }',
+        '        return $this->createReturn($stmt, function ($s) {',
     ])
     if len(analysis_obj.get_read_validations()) > 0:
+        # TODO add the invalid rows to a "invalidrows" array in the return
+        # structure.
         ret.extend([
-            '        $rows = array();',
-            '        foreach ($stmt->fetchAll() as $row) {',
-            '            if (!$this->validateRead($row)) {',
-            '                return false;',
+            '            $rows = array();',
+            '            foreach ($s->fetchAll() as $row) {',
+            '                if (!$this->validateRead($row)) {',
+            '                    return null;',
+            '                }',
+            '                $rows[] = $row;',
             '            }',
-            '            $rows[] = $row;',
-            '        }',
             ''
         ])
     else:
         ret.extend([
-            '        $rows = $stmt->fetchAll();',
+            '            return $s->fetchAll();',
         ])
-
     ret.extend([
-        '        return $rows;',
+        '        });',
         '    }', '',
     ])
 
-    # TODO replace the "where clause" with the real where clause data structures
 
+    # NOTE: no where clause object support for the "any" 
     ret.extend([
         '',
         '    public function countAny($db, $whereClause = false, '
@@ -191,8 +264,9 @@ def generate_read(analysis_obj):
         '        $stmt = $db->prepare(\'SELECT COUNT(*) FROM ' +
         analysis_obj.sql_name + ' \'.$whereClause);',
         '        $stmt->execute($data);',
-        '        if ($this->checkForErrors($db)) { return false; }',
-        '        return $stmt->fetchColumn();',
+        '        return $this->createReturn($stmt, function ($s) {',
+        '            return intval($s->fetchColumn());',
+        '        });',
         '    }', '', '',
         '    public function readAny($db, $query, $data, $start = -1, '
         '$end = -1) {',
@@ -202,10 +276,11 @@ def generate_read(analysis_obj):
         '        $stmt = $db->prepare($query);',
         '        $stmt->setFetchMode(PDO::FETCH_ASSOC);',
         '        $stmt->execute($data);',
-        '        if ($this->checkForErrors($db)) { return false; }',
-        # No analysis can be done with the results
-        '        $rows = $stmt->fetchAll();',
-        '        return $rows;',
+        # No validation can be performed with the results, because we don't know
+        # what's in the results.
+        '        return $this->createReturn($stmt, function ($s) {',
+        '            return $s->fetchAll();',
+        '        });',
         '    }',
         '',
     ])
@@ -220,6 +295,9 @@ def generate_read(analysis_obj):
         # each column in the column lists comes from the current table, and
         # never from a joined-to table.  So, we don't need to worry about
         # the table name as part of the column name.
+        
+        # FIXME add whre clause support
+        
         read_by_analysis = [analysis_obj.get_column_analysis(c)
                             for c in read_by_columns]
         read_by_names = [c.sql_name for c in read_by_analysis]
@@ -249,15 +327,18 @@ def generate_read(analysis_obj):
 
         ret.extend([
             '',
-            '    public function countBy_' + title + '($db, ' + args + ') {',
+            '    public function countBy_' + title + '($db, ' + args +
+            where_arg + ') {',
             '        $sql = \'SELECT COUNT(*) ' + clause_sql + '\';',
-            '        $stmt = $db->prepare($sql);',
         ])
         ret.extend(setup_code)
+        ret.extend(generate_where_clause(analysis_obj, True))
         ret.extend([
+            '        $stmt = $db->prepare($sql);',
             '        $stmt->execute($data);',
-            '        if ($this->checkForErrors($db)) { return false; }',
-            '        return $stmt->fetchColumn();',
+            '        return $this->createReturn($stmt, function ($s) {',
+            '            return intval($s->fetchColumn());',
+            '        });',
             '    }', '' '',
             '    public function readBy_' + title + '($db, ' + args +
             ', $order = false, $start = -1, $end = -1) {',
@@ -272,27 +353,28 @@ def generate_read(analysis_obj):
             '        $stmt = $db->prepare($sql);',
             '        $stmt->setFetchMode(PDO::FETCH_ASSOC);',
             '        $stmt->execute($data);',
-            '        if ($this->checkForErrors($db)) { return false; }',
+            # FIXME correct the return/error check to use createReturn 
+            '        return $this->createReturn($stmt, function ($s) {',
         ])
 
         if len(analysis_obj.get_read_validations()) > 0:
             ret.extend([
-                '        $rows = array();',
-                '        foreach ($stmt->fetchAll() as $row) {',
-                '            if (!$this->validateRead($row)) {',
-                '                return false;',
+                '            $rows = array();',
+                '            foreach ($s->fetchAll() as $row) {',
+                '                if (!$this->validateRead($row)) {',
+                '                    return null;',
+                '                }',
+                '                $rows[] = $row;',
                 '            }',
-                '            $rows[] = $row;',
-                '        }',
-                ''
+                '            return $rows',
             ])
         else:
             ret.extend([
-                '        $rows = $stmt->fetchAll();',
+                '            return $s->fetchAll();',
             ])
 
         ret.extend([
-            '        return $rows;',
+            '        });',
             '    }', '',
         ])
 
@@ -453,15 +535,18 @@ def generate_create(analysis_obj):
     ret.extend([
         '        $stmt = $db->prepare($sql);',
         '        $stmt->execute($data);',
-        '        if ($this->checkForErrors($db)) { return false; }',
+        '        $ret = $this->createReturn($stmt, function ($s) {',
+        '            return true;',
+        '        });',
     ])
 
+    # FIXME return the new structure
+
     if create_data.generated_column_name is not None:
-        ret.append('        return $db->lastInsertId();')
-    else:
-        ret.append('        return true;')
+        ret.append('        $ret["result"] = $db->lastInsertId();')
 
     ret.extend([
+        '        return $ret;',
         '    }',
         ''
     ])
@@ -502,7 +587,7 @@ def generate_update(analysis_obj):
                 # TODO in the future, this might be code
                 assert isinstance(uvc, sqlmigration.model.SqlConstraint)
                 column_name_values[column.sql_name] = uvc.sql_args(
-                    PLATFORMS, lambda a: ':' + a)
+                    PLATFORMS, PREPSQL_CONVERTER)
                 assert column_name_values[column.sql_name] is not None
                 if len(column.update_arguments) > 0:
                     optional_col_args.append(
@@ -512,7 +597,8 @@ def generate_update(analysis_obj):
                     always_column_names.append(column.sql_name)
 
             else:
-                column_name_values[column.sql_name] = ':' + column.sql_name
+                column_name_values[column.sql_name] = PREPSQL_CONVERTER(
+                            column.sql_name)
                 optional_col_args.append([column.sql_name, [column.sql_name]])
                 optional_argument_names.append(column.sql_name)
 
@@ -573,9 +659,9 @@ def generate_update(analysis_obj):
     ret.extend([
         '        $stmt = $db->prepare($sql);',
         '        $stmt->execute($data);',
-        '        if ($this->checkForErrors($db)) { return false; }',
-        '        $data["*rows"] = $stmt->rowCount();',
-        '        return $data;',
+        '        return $this->createReturn($stmt, function ($s) {',
+        '            return true;',
+        '        });',
         '    }', ''
     ])
 
@@ -608,8 +694,9 @@ def generate_delete(analysis_obj):
     ret.extend([
         '        );',
         '        $stmt->execute($data);',
-        '        if ($this->checkForErrors($db)) { return false; }',
-        '        return $stmt->rowCount();',
+        '        return $this->createReturn($stmt, function ($s) {',
+        '            return true;',
+        '        });',
         '    }'
         '',
     ])
@@ -648,7 +735,7 @@ def generate_validations(analysis_obj):
     # FIXME --------------------------------------------------------
     # FIXME --------------------------------------------------------
     # FIXME --------------------------------------------------------
-    # FIXME all below here
+    # FIXME these comments and what they call need to be redone
 
     #for v in processed_columns.php_read:
     #    assert isinstance(v, ProcessedPhpValidationConstraint)
@@ -718,6 +805,30 @@ def generate_php_name(schema_name):
                 c = c.lower()
             ret += c
     assert len(ret) > 0
+    return ret
+
+
+def generate_where_clause(analysis_obj, already_added_where):
+    ret = []
+    if len(analysis_obj.schema.where_clauses) > 0:
+        ret.extend([
+            '        if ($whereClauses !== null && sizeof($whereClauses) > 0) {',
+            '            $hasWhere = false;',
+            '            foreach ($whereClauses as $w) {',
+            '                if ($hasWhere) {',
+            '                    $sql .= " AND "',
+            '                } else {',
+        ])
+        if not already_added_where:
+            ret.append('                    $sql .= " WHERE";')
+        ret.extend([
+            '                    $hasWhere = true;',
+            '                }',
+            '                $w->bindVariables($data);',
+            '                $sql .= $w;',
+            '            }',
+            '        }',
+        ])
     return ret
 
 

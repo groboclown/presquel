@@ -268,7 +268,7 @@ class SchemaParser(object):
             self.error("did not specify schema type for change")
 
         return SqlChange(change_obj.order, change_obj.comment, schema_type,
-                         SqlSet(sql_set))
+                         SqlSet(sql_set, None))
 
     def _parse_table(self, d):
         if not isinstance(d, dict):
@@ -353,7 +353,7 @@ class SchemaParser(object):
         assert len(sql_set) > 0
         return View(view_obj.order, view_obj.comment, view_obj.catalog_name,
                     replace_if_exists, view_obj.schema_name, view_obj.name,
-                    SqlSet(sql_set), columns, view_obj.constraints,
+                    SqlSet(sql_set, None), columns, view_obj.constraints,
                     view_obj.changes, wheres, extended)
 
     def _parse_procedure(self, d):
@@ -398,7 +398,7 @@ class SchemaParser(object):
             if len(sql_set) <= 0:
                 return self.error("requires 'sql' or 'dialects' for sql change")
             return SqlChange(change_obj.order, change_obj.comment, schema_type,
-                             SqlSet(sql_set))
+                             SqlSet(sql_set, None))
         else:
             return Change(change_obj.order, change_obj.comment, schema_type,
                           change_type)
@@ -465,45 +465,51 @@ class SchemaParser(object):
         assert isinstance(d, dict)
 
         name = None
-        sql_set = None
+        sql_sets = []
+        arguments = []
         
         for  (k, v) in d.items():
             k = _strip_key(k)
             if k == 'dialects':
-                ss = []
                 for ch in self.fetch_dicts_from_list(k, v, 'dialect'):
                     sql = SqlStatementBuilder()
-                    ss.append(sql.make(ch))
-                sql_set = SqlSet(ss)
-            elif k == 'sql' or k == 'value':
+                    sql_sets.append(sql.make(ch))
+            elif k in ['sql', 'value']:
                 ch = {
                     'syntax': 'universal',
                     'platforms': 'all',
                     'sql': v
                 }
                 sql = SqlStatementBuilder()
-                sql_set = SqlSet([sql.make(ch)])
+                sql_sets.append(sql.make(ch))
+            elif k == 'argument':
+                arguments.append(v.strip())
+            elif k == 'arguments':
+                arguments.extend(self._parse_args(k, v))
             else:
                 self.error("unknown key (" + k + ") set to " + repr(v))
+        if len(sql_sets) <= 0:
+            self.error("no sql or dialects set for where clause")
         
-        return WhereClause(name, sql_set)
+        return WhereClause(name, SqlSet(sql_sets, arguments))
 
     def _parse_extended_sql(self, d):
         assert isinstance(d, dict)
 
         name = None
-        sql_set = None
+        sql_sets = []
         sql_type = None
+        arguments = []
         
         for (k, v) in d.items():
             if k in ['schematype', 'type', 'operation']:
                 assert isinstance(v, str)
-                sql_type
+                sql_type = v.strip()
             elif k == 'dialects':
                 for ch in self.fetch_dicts_from_list(
                         k, v, ['dialect']):
                     sql = SqlStatementBuilder()
-                    sql_set.append(sql.make(ch))
+                    sql_sets.append(sql.make(ch))
             elif k in ['statement', 'sql', 'query', 'execute']:
                 ch = {
                     'syntax': 'universal',
@@ -511,11 +517,18 @@ class SchemaParser(object):
                     'sql': v
                 }
                 sql = SqlStatementBuilder()
-                sql_set.append(sql.make(ch))
+                sql_sets.append(sql.make(ch))
+            elif k == 'argument':
+                arguments.append(v.strip())
+            elif k == 'arguments':
+                arguments.extend(self._parse_args(k, v))
             else:
                 self.error("unknown key (" + k + ") set to " + repr(v))
+                
+        if len(sql_sets) <= 0:
+            self.error("no sql or dialects set for extended sql")
         
-        return ExtendedSql(name, sql_type, sql_set)
+        return ExtendedSql(name, sql_type, SqlSet(sql_sets, arguments))
 
     def parse_constraint(self, parent_column, d):
         assert isinstance(d, dict)
@@ -523,7 +536,7 @@ class SchemaParser(object):
         cons_obj = BaseObjectBuilder(self)
         constraint_type = None
         changes = []
-        sql_set = None
+        sql_sets = []
         language = None
         code = None
         name = None
@@ -561,11 +574,9 @@ class SchemaParser(object):
             elif k == 'type':
                 constraint_type = str(v).strip()
             elif k == 'dialects':
-                ss = []
                 for ch in self.fetch_dicts_from_list(k, v, 'dialect'):
                     sql = SqlStatementBuilder()
-                    ss.append(sql.make(ch))
-                sql_set = SqlSet(ss)
+                    sql_sets.append(sql.make(ch))
             elif k == 'sql' or k == 'value':
                 ch = {
                     'syntax': 'universal',
@@ -573,7 +584,7 @@ class SchemaParser(object):
                     'sql': v
                 }
                 sql = SqlStatementBuilder()
-                sql_set = SqlSet([sql.make(ch)])
+                sql_sets.append(sql.make(ch))
             elif k == 'language':
                 language = v.strip().lower()
             elif k == 'code':
@@ -583,21 +594,7 @@ class SchemaParser(object):
             elif k == 'argument':
                 arguments.append(v.strip())
             elif k == 'arguments':
-                if isinstance(v, str):
-                    arguments.append([a.strip() for a in v.split(',')])
-                else:
-                    d_list = []
-                    for c in v:
-                        if isinstance(c, str):
-                            arguments.append([c.strip()])
-                        elif isinstance(c, dict):
-                            d_list.append(c)
-                        else:
-                            raise Exception("arguments can be a string, or "
-                                            "contain a list of strings or "
-                                            "dictionaries")
-                    for c in self.fetch_dicts_from_list(k, d_list, 'argument'):
-                        arguments.append(c.strip())
+                arguments.extend(self._parse_args(k, v))
             else:
                 # Custom constraint key/values
                 details[k] = v
@@ -606,14 +603,14 @@ class SchemaParser(object):
             column_names = [parent_column]
 
         assert constraint_type is not None and len(constraint_type) > 0
-        if sql_set is not None:
+        if len(sql_sets) > 0:
             assert language is None
             assert code is None
             if name is not None:
                 details['name'] = name
             return SqlConstraint(cons_obj.order, cons_obj.comment,
                                  constraint_type, column_names, details,
-                                 sql_set, arguments, changes)
+                                 SqlSet(sql_sets, arguments), changes)
 
         if language is not None and code is not None:
             if name is not None:
@@ -710,6 +707,26 @@ class SchemaParser(object):
                     self.error('only ' + str(expected_elements) +
                                ' are allowed inside "' + k + '"')
         return ret
+    
+    def _parse_arguments(self, k, v):
+        arguments = []
+        if isinstance(v, str):
+            arguments.append([a.strip() for a in v.split(',')])
+        else:
+            d_list = []
+            for c in v:
+                if isinstance(c, str):
+                    arguments.append([c.strip()])
+                elif isinstance(c, dict):
+                    d_list.append(c)
+                else:
+                    raise Exception("arguments can be a string, or "
+                                    "contain a list of strings or "
+                                    "dictionaries")
+            for c in self.fetch_dicts_from_list(k, d_list, 'argument'):
+                arguments.append(c.strip())
+        return arguments
+        
 
 
 def _parse_schema_type(type_name):

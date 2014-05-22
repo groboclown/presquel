@@ -137,15 +137,17 @@ class SqlString(object):
 
 
 class SqlSet(object):
-    def __init__(self, sql_set):
+    def __init__(self, sql_set, arguments):
         assert ((isinstance(sql_set, tuple) or isinstance(sql_set, list))
                 and len(sql_set) > 0)
+        if arguments is None:
+            arguments = []
+        assert (isinstance(arguments, list) or isinstance(arguments, tuple))
         self.__sql_set = sql_set
+        self.__arguments = arguments
 
     def get(self):
-        ret = []
-        ret.extend(self.__sql_set)
-        return ret
+        return tuple(self.__sql_set)
 
     def get_for_platform(self, platforms):
         """
@@ -171,6 +173,10 @@ class SqlSet(object):
                     'all' in sql.platforms):
                 return sql
         return None
+    
+    @property
+    def arguments(self):
+        return tuple(self.__arguments)
 
     def sql_args(self, platforms, arg_converter):
         """

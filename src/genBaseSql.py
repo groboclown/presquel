@@ -7,6 +7,8 @@ import sqlmigration
 
 def find_max_order_len(max_len, schema_list):
     for sch in schema_list:
+        if not isinstance(sch, sqlmigration.model.SchemaObject):
+            raise Exception("expected SchemaObject, found " + repr(sch)) 
         ord_len = len(str(sch.order.items()[0]))
         if ord_len > max_len:
             max_len = ord_len

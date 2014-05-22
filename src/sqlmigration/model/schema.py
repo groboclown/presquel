@@ -135,12 +135,11 @@ class Constraint(SchemaObject):
 
 class SqlConstraint(Constraint):
     def __init__(self, order, comment, constraint_type, column_names, details,
-                 sql_set, arguments, changes):
+                 sql_set, changes):
         Constraint.__init__(self, order, comment, constraint_type, column_names,
                             details, changes)
         assert isinstance(sql_set, SqlSet)
         self.__sql_set = sql_set
-        self.__arguments = arguments or []
 
     @property
     def sql(self):
@@ -159,7 +158,7 @@ class SqlConstraint(Constraint):
 
     @property
     def arguments(self):
-        return self.__arguments
+        return self.sql.arguments
 
 
 class LanguageConstraint(Constraint):
@@ -294,6 +293,21 @@ class WhereClause(object):
     @property
     def sql(self):
         return self.__sqlset
+    
+    @property
+    def arguments(self):
+        return self.sql.arguments
+
+    def sql_args(self, platforms, arg_converter):
+        """
+        Return the sql for the given platforms, with the argument values
+        replaced, using the function "arg_converter", which takes the argument
+        name as input, and outputs the prepared statement replacement string.
+
+        :param arg_converter:
+        :return:
+        """
+        return self.sql.sql_args(platforms, arg_converter)
 
 
 class ExtendedSql(object):
@@ -326,6 +340,17 @@ class ExtendedSql(object):
     @property
     def sql(self):
         return self.__sqlset
+
+    def sql_args(self, platforms, arg_converter):
+        """
+        Return the sql for the given platforms, with the argument values
+        replaced, using the function "arg_converter", which takes the argument
+        name as input, and outputs the prepared statement replacement string.
+
+        :param arg_converter:
+        :return:
+        """
+        return self.sql.sql_args(platforms, arg_converter)
 
 
 class ColumnarSchemaObject(SchemaObject):
@@ -377,7 +402,7 @@ class ColumnarSchemaObject(SchemaObject):
 
     @property
     def sub_schema(self):
-        ret = [self.columns]
+        ret = list(self.columns)
         ret.extend(self.constraints)
         return ret
 
@@ -387,8 +412,11 @@ class Table(ColumnarSchemaObject):
     def __init__(self, order, comment, catalog_name, schema_name, table_name,
                  table_space, columns, table_constraints, changes,
                  where_clauses, extended_sql):
-        SchemaObject.__init__(self, table_name, order, comment, TABLE_TYPE,
-                              changes, where_clauses, extended_sql)
+        ColumnarSchemaObject.__init__(self, order, comment, catalog_name,
+                                      schema_name, table_name, columns,
+                                      table_constraints, TABLE_TYPE, changes,
+                                      where_clauses, extended_sql)
+        
         self.__table_name = table_name
         self.__table_space = table_space
 
@@ -405,8 +433,12 @@ class View(ColumnarSchemaObject):
     def __init__(self, order, comment, catalog_name, replace_if_exists,
                  schema_name, view_name, select_query, columns,
                  table_constraints, changes, where_clauses, extended_sql):
-        SchemaObject.__init__(self, view_name, order, comment, VIEW_TYPE,
-                              changes, where_clauses, extended_sql)
+        ColumnarSchemaObject.__init__(self, order, comment, catalog_name,
+                                      schema_name, view_name, columns,
+                                      table_constraints, VIEW_TYPE, changes,
+                                      where_clauses,
+                                      extended_sql)
+        
         assert isinstance(select_query, SqlSet)
         self.__replace_if_exists = replace_if_exists
         self.__view_name = view_name
@@ -430,14 +462,14 @@ class View(ColumnarSchemaObject):
 
 
 class Sequence(SchemaObject):
-    # FIXME implement this
+    # FIXME implement this class
     def __init__(self, order, comment, changes):
         SchemaObject.__init__(self, '', order, comment, SEQUENCE_TYPE, changes)
         raise Exception("not implemented")
 
 
 class Procedure(SchemaObject):
-    # FIXME implement this
+    # FIXME implement this class
     def __init__(self, order, comment, changes):
         SchemaObject.__init__(self, '', order, comment, PROCEDURE_TYPE, changes)
         raise Exception("not implemented")
