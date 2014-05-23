@@ -485,7 +485,7 @@ class SchemaParser(object):
             elif k == 'argument':
                 arguments.append(v.strip())
             elif k == 'arguments':
-                arguments.extend(self._parse_args(k, v))
+                arguments.extend(self._parse_arguments(k, v))
             else:
                 self.error("unknown key (" + k + ") set to " + repr(v))
         if len(sql_sets) <= 0:
@@ -518,10 +518,12 @@ class SchemaParser(object):
                 }
                 sql = SqlStatementBuilder()
                 sql_sets.append(sql.make(ch))
+            elif k == 'name':
+                name = v.strip()
             elif k == 'argument':
                 arguments.append(v.strip())
             elif k == 'arguments':
-                arguments.extend(self._parse_args(k, v))
+                arguments.extend(self._parse_arguments(k, v))
             else:
                 self.error("unknown key (" + k + ") set to " + repr(v))
                 
@@ -594,7 +596,7 @@ class SchemaParser(object):
             elif k == 'argument':
                 arguments.append(v.strip())
             elif k == 'arguments':
-                arguments.extend(self._parse_args(k, v))
+                arguments.extend(self._parse_arguments(k, v))
             else:
                 # Custom constraint key/values
                 details[k] = v
@@ -705,18 +707,19 @@ class SchemaParser(object):
                     ret.append(vv)
                 else:
                     self.error('only ' + str(expected_elements) +
-                               ' are allowed inside "' + k + '"')
+                               ' are allowed inside "' + k + '" (found "' +
+                               str(kk) + '")')
         return ret
     
     def _parse_arguments(self, k, v):
         arguments = []
         if isinstance(v, str):
-            arguments.append([a.strip() for a in v.split(',')])
+            arguments.extend([a.strip() for a in v.split(',')])
         else:
             d_list = []
             for c in v:
                 if isinstance(c, str):
-                    arguments.append([c.strip()])
+                    arguments.append(c.strip())
                 elif isinstance(c, dict):
                     d_list.append(c)
                 else:

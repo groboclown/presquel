@@ -111,7 +111,7 @@ def generate_file(analysis_obj):
                 analysis_obj))
         
         # FIXME add extended sql creation
-        
+        f.writelines('\n'.join(generate_extended_sql(analysis_obj)))
 
         f.writelines('\n'.join(generate_validations(
             analysis_obj)))
@@ -680,7 +680,6 @@ def generate_delete(analysis_obj):
            ' AND '.join([(c.sql_name + ' = :' + c.sql_name)
            for c in analysis_obj.primary_key_columns]))
 
-    # FIXME return the number of rows removed
     ret = [
         '',
         '    public function remove($db, ' + ', '.join(args) + ') {',
@@ -701,6 +700,51 @@ def generate_delete(analysis_obj):
         '',
     ])
 
+    return ret
+
+
+def generate_extended_sql(analysis_obj):
+    assert isinstance(analysis_obj, sqlmigration.codegen.ColumnSetAnalysis)
+    
+    extended_sql_set = analysis_obj.schema.extended_sql
+    
+    ret = []
+    
+    for extended_sql in extended_sql_set:
+        assert isinstance(extended_sql, sqlmigration.model.ExtendedSql)
+        php_name = generate_php_name(extended_sql.name)
+        arg_prefix = ''
+        if len(extended_sql.arguments) > 0:
+            arg_prefix = ', '
+        ret.extend([
+            '',
+            '    public function run' + php_name + '($db' + arg_prefix +
+            (', '.join(('$' + a) for a in extended_sql.arguments)) +
+            ', $start = -1, $end = -1) {',
+            '        $sql = \'' + sqlmigration.codegen.php.escape_php_string(
+            extended_sql.sql_args(PLATFORMS, PREPSQL_CONVERTER)) + '\';',
+            '        if ($start >= 0 && $end > 0) {',
+            '            $sql .= \' LIMIT \'.$start.\',\'.$end;',
+            '        }',
+            '        $data = array(',
+        ])
+        
+        for a in extended_sql.arguments:
+            ret.append('            "' + a + '" => $' + a + ',')
+        
+        ret.extend([
+            '        );',
+            '        $stmt = $db->prepare($sql);',
+            '        $stmt->setFetchMode(PDO::FETCH_ASSOC);',
+            '        $stmt->execute($data);',
+            # No validation can be performed with the results, because we don't know
+            # what's in the results.
+            '        return $this->createReturn($stmt, function ($s) {',
+            '            return $s->fetchAll();',
+            '        });',
+            '    }', '', '',
+        ])
+    
     return ret
 
 

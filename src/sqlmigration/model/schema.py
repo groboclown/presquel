@@ -340,6 +340,10 @@ class ExtendedSql(object):
     @property
     def sql(self):
         return self.__sqlset
+    
+    @property
+    def arguments(self):
+        return self.__sqlset.arguments
 
     def sql_args(self, platforms, arg_converter):
         """
@@ -367,8 +371,8 @@ class ColumnarSchemaObject(SchemaObject):
         self.__schema_name = schema_name
         self.__columns = columns
         self.__top_constraints = top_constraints
-        self.__where_clauses = where_clauses
-        self.__extended_sql = extended_sql
+        self.__where_clauses = where_clauses or []
+        self.__extended_sql = extended_sql or []
 
     @property
     def catalog_name(self):
