@@ -11,5 +11,5 @@ def escape_php_string(s):
     :return: escaped text, ready for insertion into a PHP string.
     """
 
-    return s.replace('\'', '\\\'').replace('\"', '\\"').replace('\n', '\\n').\
-        replace('\r', '\\r').replace('\t', '\\t').replace('\\', '\\\\')
+    return (s.replace('\\', '\\\\').replace("'", "\\'").replace('"', '\\"').
+        replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t'))

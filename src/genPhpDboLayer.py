@@ -69,24 +69,25 @@ def generate_file(analysis_obj):
             
             if len(w.arguments) > 0:
                 for a in w.arguments:
-                    f.writeline('    public $' + a + ';\n')
-                f.writeline('    function __construct(' +
+                    f.write('    public $' + a + ';\n')
+                f.write('    function __construct(' +
                     (', '.join(('$' + a) for a in w.arguments)) + ') {\n')
                 for a in w.arguments:
-                    f.writeline('        $this->' + a + ' = $' + a + ';\n')
-                f.writeline('    }\n')
+                    f.write('        $this->' + a + ' = $' + a + ';\n')
+                f.write('    }\n')
             f.writelines('\n'.join([
                 '', '',
                 '    public function bindVariables($data) {',
+                '',
             ]))
             for a in w.arguments:
-                f.writeline('        $data["' + a + '"] = $this->' + a + ';\n')
+                f.write('        $data["' + a + '"] = $this->' + a + ';\n')
             f.writelines('\n'.join([
                 '    }', '', ''
                 '    public function __toString() {',
                 '        return \'' +
                 sqlmigration.codegen.php.escape_php_string(
-                       w.sql_args(PLATFORMS, PREPSQL_CONVERTER)) + '\';'
+                       w.sql_args(PLATFORMS, PREPSQL_CONVERTER)) + '\';',
                 '    }', '',
                 '}', ''
             ]))
@@ -860,7 +861,7 @@ def generate_where_clause(analysis_obj, already_added_where):
             '            $hasWhere = false;',
             '            foreach ($whereClauses as $w) {',
             '                if ($hasWhere) {',
-            '                    $sql .= " AND "',
+            '                    $sql .= " AND ";',
             '                } else {',
         ])
         if not already_added_where:

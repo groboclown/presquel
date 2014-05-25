@@ -482,6 +482,8 @@ class SchemaParser(object):
                 }
                 sql = SqlStatementBuilder()
                 sql_sets.append(sql.make(ch))
+            elif k == 'name':
+                name = v.strip()
             elif k == 'argument':
                 arguments.append(v.strip())
             elif k == 'arguments':
