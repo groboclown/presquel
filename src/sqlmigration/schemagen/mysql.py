@@ -279,7 +279,8 @@ def _generate_base_constraints(table, columns, ct):
                 ct.details['option'])
 
     elif ct.constraint_type == 'uniqueindex':
-        assert name is not None
+        if name is None:
+            raise Exception("No name defined for unique index")
         constraint_sql += '\n    , CONSTRAINT ' + name + \
                           ' UNIQUE INDEX'
         if 'using' in ct.details:
