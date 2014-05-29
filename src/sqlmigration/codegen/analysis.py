@@ -246,8 +246,14 @@ class ColumnSetAnalysis(SchemaAnalysis):
         c = self.top_analysis
         assert isinstance(c, TopAnalysis)
         for col_set in c.column_index_sets:
-            ret.append([self.get_column_analysis(col).schema
-                        for col in col_set])
+            cis = []
+            for col in col_set:
+                assert isinstance(col, str)
+                ca = self.get_column_analysis(col)
+                if ca is None:
+                    raise Exception("no schema for " + col + " in " + self.sql_name)
+                cis.append(ca.schema)
+            ret.append(cis)
 
         return ret
 
