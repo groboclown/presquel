@@ -50,6 +50,7 @@ def generate_file(analysis_obj):
             f.writelines('\n'.join([
                 '', '',
                 'class ' + class_name + '__WhereParent {',
+                # No need to pass by reference
                 '    public function bindVariables($data) {}',
                 '}',
                 '', ''
@@ -77,7 +78,7 @@ def generate_file(analysis_obj):
                 f.write('    }\n')
             f.writelines('\n'.join([
                 '', '',
-                '    public function bindVariables($data) {',
+                '    public function bindVariables(&$data) {',
                 '',
             ]))
             for a in w.arguments:
@@ -177,7 +178,7 @@ def generate_read(analysis_obj):
     ]
     ret.extend(generate_where_clause(analysis_obj, False))
     ret.extend([
-        '        $stmt = $db->prepare($data);',
+        '        $stmt = $db->prepare($sql);',
         '        $stmt->execute($data);',
         '        return $this->createReturn($stmt, function ($s) {',
         '            return intval($s->fetchColumn());',
@@ -194,9 +195,6 @@ def generate_read(analysis_obj):
         ', $order = false, $start = -1, $end = -1) {',
         '        $sql = \'' + escaped_sql + '\';',
     ])
-    ret.extend([
-        '        $sql .= \'' + always_order_by_clause + '\';'
-    ])
     if len(arg_names) > 0:
         ret.append('        $data = array(')
         # Notice how this skips the use of arg_names, and recreates those values
@@ -207,6 +205,7 @@ def generate_read(analysis_obj):
         ret.append('        $data = array();')
     if len(analysis_obj.schema.where_clauses) > 0:
         ret.extend(generate_where_clause(analysis_obj, False))
+    ret.append('        $sql .= \'' + always_order_by_clause + '\';')
     order_code = []
     if default_order_by is not None:
         order_code.extend([
