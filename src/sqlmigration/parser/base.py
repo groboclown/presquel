@@ -526,6 +526,7 @@ class SchemaParser(object):
                 arguments.append(v.strip())
             elif k == 'arguments':
                 arguments.extend(self._parse_arguments(k, v))
+            # TODO add support for columns if type type is 'query'
             else:
                 self.error("unknown key (" + k + ") set to " + repr(v))
                 

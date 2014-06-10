@@ -313,6 +313,8 @@ class WhereClause(object):
 class ExtendedSql(object):
     """
     Defines extra Sql statements that should be added to the generated code.
+    
+    TODO these should add possible column definitions for QUERY types.
     """
     def __init__(self, name, sql_type, sqlset):
         """
