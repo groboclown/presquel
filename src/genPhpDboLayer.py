@@ -218,7 +218,7 @@ def generate_read(analysis_obj):
     else:
         order_code.extend([
             '        if (!! $order) {',
-            '            $sql .= $order;',
+            '            $sql .= " ORDER BY " . $order;',
             '        }'
         ])
     ret.extend(order_code)
@@ -296,8 +296,6 @@ def generate_read(analysis_obj):
         # never from a joined-to table.  So, we don't need to worry about
         # the table name as part of the column name.
         
-        # FIXME add whre clause support
-        
         read_by_analysis = [analysis_obj.get_column_analysis(c)
                             for c in read_by_columns]
         read_by_names = [c.sql_name for c in read_by_analysis]
@@ -341,10 +339,12 @@ def generate_read(analysis_obj):
             '        });',
             '    }', '' '',
             '    public function readBy_' + title + '($db, ' + args +
-            ', $order = false, $start = -1, $end = -1) {',
-            '        $sql = \'' + select + always_order_by_clause + '\';',
+            where_arg + ', $order = false, $start = -1, $end = -1) {',
+            '        $sql = \'' + select + '\';',
         ])
         ret.extend(setup_code)
+        ret.extend(generate_where_clause(analysis_obj, True))
+        ret.append('        $sql .= \'' + always_order_by_clause + '\';')
         ret.extend(order_code)
         ret.extend([
             '        if ($start >= 0 && $end > 0) {',
@@ -740,7 +740,14 @@ def generate_extended_sql(analysis_obj):
             # No validation can be performed with the results, because we don't know
             # what's in the results.
             '        return $this->createReturn($stmt, function ($s) {',
-            '            return $s->fetchAll();',
+        ])
+        if extended_sql.sql_type == 'query':
+            ret.append('            return $s->fetchAll();')
+        elif extended_sql.sql_type in ['id', 'count']:
+            ret.append('            return intval($s->fetchColumn);')
+        else:
+            ret.append('            return true;')
+        ret.extend([
             '        });',
             '    }', '', '',
         ])
@@ -855,24 +862,30 @@ def generate_php_name(schema_name):
 def generate_where_clause(analysis_obj, already_added_where):
     ret = []
     if len(analysis_obj.schema.where_clauses) > 0:
-        ret.extend([
-            '        if ($whereClauses !== null && sizeof($whereClauses) > 0) {',
-            '            $hasWhere = false;',
+        ret.append(
+            '        if ($whereClauses !== null && sizeof($whereClauses) > 0) {')
+        if already_added_where:
+            ret.extend([
             '            foreach ($whereClauses as $w) {',
-            '                if ($hasWhere) {',
-            '                    $sql .= " AND ";',
-            '                } else {',
-        ])
-        if not already_added_where:
-            ret.append('                    $sql .= " WHERE";')
-        ret.extend([
-            '                    $hasWhere = true;',
-            '                }',
             '                $w->bindVariables($data);',
-            '                $sql .= $w;',
+            '                $sql .= " AND " . $w;',
             '            }',
-            '        }',
-        ])
+            ])
+        else:
+            ret.extend([
+                '            $hasWhere = false;',
+                '            foreach ($whereClauses as $w) {',
+                '                if ($hasWhere) {',
+                '                    $sql .= " AND ";',
+                '                } else {',
+                '                    $sql .= " WHERE ";',
+                '                    $hasWhere = true;',
+                '                }',
+                '                $w->bindVariables($data);',
+                '                $sql .= $w;',
+                '            }',
+            ])
+        ret.append('        }')
     return ret
 
 
