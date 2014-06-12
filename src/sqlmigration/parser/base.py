@@ -108,6 +108,8 @@ class SqlStatementBuilder(object):
             elif k == 'platforms':
                 self.set_platforms(v)
             elif k == 'sql' or k == 'query':
+                if isinstance(v, int) or isinstance(v, float):
+                    v = str(v)
                 assert isinstance(v, str)
                 self.sql = v
         if (self.sql is None or len(self.sql) <= 0 or
