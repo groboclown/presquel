@@ -330,6 +330,12 @@ class ColumnSetAnalysis(SchemaAnalysis):
             assert isinstance(con, AbstractProcessedConstraint)
             ret = [self.get_column_analysis(cn)
                    for cn in con.constraint.column_names]
+        if ret is None and len(c.unique_or_primary_sets) > 0:
+            # Default to using the first unique index/key
+            con = c.unique_or_primary_sets[0]
+            assert isinstance(con, AbstractProcessedConstraint)
+            ret = [self.get_column_analysis(cn)
+                   for cn in con.constraint.column_names]
         return ret or []
 
     @property
@@ -514,6 +520,8 @@ class TopAnalysis(SchemaAnalysis):
         self.primary_key_constraint = None
 
         self.column_index_sets = []
+        
+        self.unique_or_primary_sets = []
 
         for c in constraints_analysis:
             if c is None:
@@ -529,10 +537,14 @@ class TopAnalysis(SchemaAnalysis):
                     if c.constraint.constraint_type == 'primarykey':
                         assert self.primary_key_constraint is None
                         self.primary_key_constraint = c
+                        self.unique_or_primary_sets.append(c)
+                    elif c.constraint.constraint_type.count('unique') > 0:
+                        self.unique_or_primary_sets.append(c)
             elif c.constraint.constraint_type == 'validateread':
                 self.read_validations.append(c)
             elif c.constraint.constraint_type in ['validatewrite', 'validate']:
                 self.write_validations.append(c)
+        
 
 
 class AbstractProcessedConstraint(SchemaAnalysis):

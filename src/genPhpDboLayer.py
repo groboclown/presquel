@@ -413,6 +413,8 @@ def generate_create(analysis_obj):
     if len(create_data.required_input_values) <= 0:
         ret.append('        $has_columns = false;')
 
+    # FIXME This "where" doesn't really work right, and it doesn't look like it
+    # will ever really work right.
     has_where = False
     for r in create_data.where_values.values():
         if len(r) > 0:
@@ -465,34 +467,42 @@ def generate_create(analysis_obj):
             s2.append('            $data[\'' + a + '\'] = $' + a + ';')
             if len(create_data.required_input_values) <= 0:
                 s2.extend([
-                    '            if (! $has_columns) {',
-                    '                $has_columns = true;',
-                    '            } else {',
-                    '                $sql .= \', \';',
-                    '                $values .= \', \';',
-                    '            }',
+                    '                if (! $has_columns) {',
+                    '                    $has_columns = true;',
+                    '                } else {',
+                    '                    $sql .= \', \';',
+                    '                    $values .= \', \';',
+                    '                }',
+                    '                $sql .= \'' + r.column_name + '\';',
+                    '                $values .= \'' +
+                    r.get_sql_value(True) + '\';',
                 ])
-            s2.extend([
-                '                $sql .= \', ' + r.column_name + '\';',
-                '                $values .= \', ' +
-                r.get_sql_value(True) + '\';',
-            ])
+            else:
+                s2.extend([
+                    '                $sql .= \', ' + r.column_name + '\';',
+                    '                $values .= \', ' +
+                    r.get_sql_value(True) + '\';',
+                ])
         for a in r.get_sql_arguments(False):
             s3.append('            $data[\'' + a + '\'] = $' + a + ';')
             if len(create_data.required_input_values) <= 0:
                 s3.extend([
-                    '            if (! $has_columns) {',
-                    '                $has_columns = true;',
-                    '            } else {',
-                    '                $sql .= \', \';',
-                    '                $values .= \', \';',
-                    '            }',
+                    '                if (! $has_columns) {',
+                    '                    $has_columns = true;',
+                    '                } else {',
+                    '                    $sql .= \', \';',
+                    '                    $values .= \', \';',
+                    '                }',
+                    '                $sql .= \'' + r.column_name + '\';',
+                    '                $values .= \'' +
+                    r.get_sql_value(False) + '\';',
                 ])
-            s3.extend([
-                '                $sql .= \', ' + r.column_name + '\';',
-                '                $values .= \', ' +
-                r.get_sql_value(False) + '\';',
-            ])
+            else:
+                s3.extend([
+                    '                $sql .= \', ' + r.column_name + '\';',
+                    '                $values .= \', ' +
+                    r.get_sql_value(False) + '\';',
+                ])
 
         for wr in create_data.where_values[r]:
             assert isinstance(wr, sqlmigration.codegen.InputValue)
@@ -540,16 +550,157 @@ def generate_create(analysis_obj):
         '        });',
     ])
 
-    # FIXME return the new structure
-
     if create_data.generated_column_name is not None:
         ret.append('        $ret["result"] = $db->lastInsertId();')
 
     ret.extend([
         '        return $ret;',
-        '    }',
-        ''
+        '    }', ''
     ])
+    
+    
+    # -------------------------------------------------------------------
+    # Create the upsert command (insert or update if exists)
+    # We should only generate this if:
+    #   - there is no autoincrement column
+    #   - there is a unique index or primary key
+    # We should also generate this for each primary key / unique index.
+    
+    
+    primary_keys = analysis_obj.primary_key_columns
+    required_input_columns = list(create_data.required_input_values)
+    non_index_required_columns = list(create_data.required_input_values)
+    allow_upsert = len(primary_keys) > 0
+    for pk in primary_keys:
+        assert isinstance(pk, sqlmigration.codegen.ColumnAnalysis)
+        if pk.auto_gen:
+            allow_upsert = False
+        else:
+            if php_argument_list.count('$' + pk.sql_name) > 0:
+                php_argument_list.remove('$' + pk.sql_name)
+            if pk not in required_input_columns:
+                required_input_columns.append(pk)
+            if pk in non_index_required_columns:
+                non_index_required_columns.remove(pk)
+    allow_upsert = allow_upsert and len(php_argument_list) > 0
+    
+    if allow_upsert:
+        #print("non index required columns: "+repr(non_index_required_columns))
+        update_values = {}
+        for cu in analysis_obj.columns_for_update:
+            assert isinstance(cu, sqlmigration.codegen.ColumnAnalysis)
+            cuv = cu.update_value
+            if cuv is not None:
+                cuvc = cuv.constraint
+                # TODO in the future, this might be code
+                assert isinstance(cuvc, sqlmigration.model.SqlConstraint)
+                update_values[cu.sql_name] = cuvc.sql_args(
+                    PLATFORMS, PREPSQL_CONVERTER)
+            else:
+                update_values[cu.sql_name] = PREPSQL_CONVERTER(cu.sql_name)
+        ret.extend([
+            '',
+            '    public function upsert($db, $' +
+            (', $'.join(c.sql_name for c in primary_keys)) + ', ' +
+            (', '.join(php_argument_list)) +
+            ') {',
+            '        $sql = \'INSERT INTO ' + analysis_obj.sql_name + ' (' +
+            # FIXME escape the php string
+            ', '.join(c.column_name for c in create_data.required_input_values) +
+            '\';',
+            '        $values = \'' + (', '.join(
+                # FIXME escape the php string
+                c.get_sql_value(True) for c in create_data.required_input_values)) +
+            '\';',
+        ])
+        dup_start = []
+        for c in non_index_required_columns:
+            if c.column_name in update_values:
+                dup_start.append(c.column_name + ' = ' +
+                                 update_values[c.column_name])
+        ret.append('        $dup = \' ON DUPLICATE KEY UPDATE ' + (', '.join(
+                dup_start)) + '\';')
+        data_values = [ '        $data = array(' ]
+        for r in create_data.required_input_values:
+            assert isinstance(r, sqlmigration.codegen.InputValue)
+            code = r.get_code_value(True)
+            if code is not None:
+                ret.append(code)
+            for arg in r.get_sql_arguments(True):
+                data_values.append('            \'' + arg + '\' => $' + arg + ',')
+        data_values.append('        );')
+        ret.extend(data_values)
+        
+        # Note that this is somewhat of a cut-n-paste from above, but not quite
+        if len(non_index_required_columns) <= 0:
+            ret.append('        $needsDupComma = false;')
+        for r in create_data.optional_input_values:
+            assert isinstance(r, sqlmigration.codegen.InputValue)
+            arguments = create_data.value_arguments[r]
+            assert arguments is not None and len(arguments) > 0
+            s1 = ['$' + a + ' !== false' for a in arguments]
+            s2 = []
+            s3 = []
+            code = r.get_code_value(True)
+            if code is not None:
+                s2.append(code)
+            code = r.get_code_value(False)
+            if code is not None:
+                s3.append(code)
+            for a in r.get_sql_arguments(True):
+                if r.column_name in update_values:
+                    if len(non_index_required_columns) <= 0:
+                        s2.extend([
+                             '        if ($needsDupComma) {',
+                             '            $dup .= \', \';',
+                             '        } else {',
+                             '            $needsDupComma = true;',
+                             '        }',
+                        ])
+                    s2.append('            $dup .= \'' +
+                              (len(non_index_required_columns) <= 0 and '' or ', ') +
+                              r.column_name + ' = ' + update_values[r.column_name] + '\';')
+                s2.extend([
+                    '            $data[\'' + a + '\'] = $' + a + ';'
+                    '            $sql .= \', ' + r.column_name + '\';',
+                    '            $values .= \', ' +
+                    r.get_sql_value(True) + '\';',
+                ])
+            for a in r.get_sql_arguments(False):
+                s3.append('            $data[\'' + a + '\'] = $' + a + ';')
+                s3.extend([
+                    '                $sql .= \', ' + r.column_name + '\';',
+                    '                $values .= \', ' +
+                    r.get_sql_value(False) + '\';',
+                ])
+    
+            ret.append('        if (' + (' && '.join(s1)) + ') {')
+            ret.extend(s2)
+            if len(s3) > 0:
+                ret.append('        } else { ')
+                ret.extend(s3)
+            ret.append('        }')
+    
+        ret.extend([
+            '        if (! $this->validateWrite($data)) {',
+            '            return false;',
+            '        }',
+        ])
+    
+        ret.append('        $sql .= \') VALUES (\'.$values.\')\' . $dup;')
+    
+        ret.extend([
+            '        $stmt = $db->prepare($sql);',
+            '        $stmt->execute($data);',
+            '        $ret = $this->createReturn($stmt, function ($s) {',
+            '            return true;',
+            '        });',
+        ])
+        
+        ret.extend([
+            '    }', ''
+        ])
+    
 
     return ret
 
