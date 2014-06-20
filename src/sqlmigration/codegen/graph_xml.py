@@ -1,16 +1,12 @@
 '''
-Handles the exporting of the model to a mxGraph XML file.
-
-    http://jgraph.github.io/mxgraph/javascript/index.html
-
-This XML can then be used as a "codec" by the mxGraph code, to allow for
-visualization of the graph in a browser.
+Converts the model to an XML format that can be used to generate a graph.
 '''
 
 from ..model import (ColumnarSchemaObject, Column)
 from . import (AnalysisModel, ColumnSetAnalysis, ColumnAnalysis,
                ProcessedForeignKeyConstraint)
 from xml.dom.minidom import getDOMImplementation
+from sqlmigration.model.schema import View, Table
 
 def generate_graph_xml(amodel):
     assert isinstance(amodel, AnalysisModel)
@@ -21,11 +17,11 @@ def generate_graph_xml(amodel):
         ant = amodel.get_analysis_for(t)
         assert isinstance(ant, ColumnSetAnalysis)
         if isinstance(t, ColumnarSchemaObject):
-            data.mk_table(t)
+            t_el = data.mk_table(t)
             for c in t.columns:
                 assert isinstance(c, Column)
-                data.mk_column(t, c)
                 anc = ant.get_column_analysis(c)
+                data.mk_column(t_el, t, anc)
                 assert isinstance(anc, ColumnAnalysis)
                 if anc.foreign_key is not None:
                     foreign_keys.append((t, c, ant, anc))
@@ -34,8 +30,22 @@ def generate_graph_xml(amodel):
         (t, c, ant, anc) = fk
         fkc = anc.foreign_key
         assert isinstance(fkc, ProcessedForeignKeyConstraint)
-        data.mk_column_link(t.name + '.' + c.name,
-                            fkc.fk_table_name + '.' + fkc.fk_column_name)
+        foreign_table = amodel.get_schema_named(fkc.fk_table_name)
+        if foreign_table is None:
+            print("No foreign table " + fkc.fk_table_name + ", referenced in " +
+                  t.name + "." + c.name)
+            continue
+        assert isinstance(foreign_table, ColumnarSchemaObject)
+        fta = amodel.get_analysis_for(foreign_table)
+        assert isinstance(fta, ColumnSetAnalysis)
+        foreign_column = fta.get_column_analysis(fkc.fk_column_name)
+        if foreign_column is None:
+            print("No foreign column " + fkc.fk_table_name + "." +
+                  fkc.fk_column_name + ", referenced in " +
+                  t.name + "." + c.name)
+            continue
+        assert isinstance(foreign_column, ColumnAnalysis)
+        data.mk_column_link(amodel.get_analysis_for(t), anc, fta, foreign_column)
     
     return data.doc.toxml('UTF-8')
 
@@ -50,27 +60,16 @@ class GraphData(object):
         self.columns = {}
         
         self._next_cell_id = 0
-        
-    def mk_cell(self, parent = None):
-        """
-        Low level cell creator.  Returns the pair (cell_id, cell Element)
-        """
-        cell = self.doc.createElement('cell')
-        self.root.appendChild(cell)
+    
+    def _mk_basic(self, name, parent = None):
+        if parent is None:
+            parent = self.root
+        el = self.doc.createElement(name)
+        parent.appendChild(el)
         cid = self._next_cell_id
         self._next_cell_id += 1
-        cell.setAttribute('id', str(cid))
-        if parent is None:
-            pass
-        elif isinstance(parent, int):
-            cell.setAttribute('parent', str(parent))
-        elif parent in self.tables:
-            cell.setAttribute('parent', str(self.tables[parent]))
-        elif parent in self.columns:
-            cell.setAttribute('parent', str(self.columns[parent]))
-        else:
-            raise Exception("bad state: " + str(type(parent)) + " (" + str(parent) + ")")
-        return (cid, cell)
+        el.setAttribute('id', str(cid))
+        return (cid, el)
     
     def mk_table(self, table_obj):
         """
@@ -78,39 +77,51 @@ class GraphData(object):
         """
         assert isinstance(table_obj, ColumnarSchemaObject)
         
-        (cid, cell) = self.mk_cell()
-        self.tables[table_obj.name] = cid
+        (cid, el) = self._mk_basic('table')
+        self.tables[table_obj] = cid
         
-        cell.setAttribute('kind', 'table')
-        cell.setAttribute('name', str(table_obj.name))
+        el.setAttribute('name', str(table_obj.name))
+        if isinstance(table_obj, View):
+            el.setAttribute('kind', 'view')
+        elif isinstance(table_obj, Table):
+            el.setAttribute('kind', 'table')
+        else:
+            raise Exception("unknown type " + str(type(table_obj)))
 
-        return cell
+        return el
     
-    def mk_column(self, table_obj, column_obj):
+    def mk_column(self, parent_el, table_obj, column_obj):
         assert isinstance(table_obj, ColumnarSchemaObject)
-        assert isinstance(column_obj, Column)
+        assert isinstance(column_obj, ColumnAnalysis)
         
-        (cid, cell) = self.mk_cell(table_obj.name)
-        self.columns[table_obj.name + '.' + column_obj.name] = cid
-        cell.setAttribute('kind', 'column')
-        cell.setAttribute('name', str(column_obj.name))
-        cell.setAttribute('type', str(column_obj.value_type))
-        #cell.setAttribute('primaryKey', column_obj.)
-        cell.setAttribute('autoIncrement',
-              column_obj.auto_increment and '1' or '0')
-        return cell
+        (cid, el) = self._mk_basic('column', parent_el)
+        self.columns[column_obj] = cid
+        
+        el.setAttribute('name', str(column_obj.sql_name))
+        el.setAttribute('type', str(column_obj.schema.value_type))
+        el.setAttribute('primaryKey',
+              column_obj.is_primary_key and '1' or '0')
+        el.setAttribute('autoIncrement',
+              column_obj.schema.auto_increment and '1' or '0')
+        return el
     
-    def mk_column_link(self, src_col_name, target_col_name, ltype = None):
-        if src_col_name not in self.columns or target_col_name not in self.columns:
-            print("No such foreign key: from " + src_col_name + " to " + target_col_name)
+    def mk_column_link(self, src_table, src_col, target_table, target_col, ltype = None):
+        assert isinstance(src_table, ColumnSetAnalysis)
+        assert isinstance(src_col, ColumnAnalysis)
+        assert isinstance(target_table, ColumnSetAnalysis)
+        assert isinstance(target_col, ColumnAnalysis)
+        
+        if src_col not in self.columns or target_col not in self.columns:
+            print("No such foreign key: from " + src_col.sql_name + " to " +
+                  target_col.sql_name)
             return
-        cell = self.mk_cell()[1]
-        cell.setAttribute('kind', 'edge')
-        cell.setAttribute('source',
-            str(self.columns[src_col_name]))
-        cell.setAttribute('target',
-            str(self.columns[target_col_name]))
+        
+        src_id = self.columns[src_col]
+        target_id = self.columns[target_col]
+        
+        el = self._mk_basic('edge')[1]
+        el.setAttribute('source', str(src_id))
+        el.setAttribute('target', str(target_id))
         if ltype is not None:
-            cell.setAttribute('value', ltype)
-        return cell
-    
+            el.setAttribute('name', ltype)
+        return el

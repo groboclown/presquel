@@ -11,71 +11,81 @@
 joint.shapes.schema = {};
 
 joint.shapes.schema.Table = joint.shapes.basic.Generic.extend({
+
     markup: [
         '<g class="rotatable">',
           '<g class="scalable">',
             '<rect class="schema-table-name-rect"/><rect class="schema-table-columns-rect"/>',
           '</g>',
-          '<text class="schema-table-name-text"/>',
+          '<text class="schema-table-name-text"/><text class="schema-table-attrs-text"/>',
         '</g>'
     ].join(''),
 
     defaults: joint.util.deepSupplement({
-        type: 'schema.Table',
-        attrs: {
-            rect: { width: 200 },
 
-            '.schema-table-name-rect': { stroke: 'black', 'stroke-width': 2, fill: {
-                type: 'linearGradient',
-                stops: [
-                    { offset: '0%', color: '#0044e7' },
-                    { offset: '100%', color: '#0034b1' },
-                ] } },
-            '.schema-table-columns-rect': { stroke: 'black', 'stroke-width': 2, fill: '#edf5fb' },
+        type: 'schema.Table',
+
+        attrs: {
+            rect: { 'width': 200 },
+
+            '.schema-table-name-rect': { 'stroke': 'black', 'stroke-width': 2, 'fill': '#3498db' },
+            '.schema-table-columns-rect': { 'stroke': 'black', 'stroke-width': 2, 'fill': '#2980b9' },
 
             '.schema-table-name-text': {
                 'ref': '.schema-table-name-rect', 'ref-y': .5, 'ref-x': .5, 'text-anchor': 'middle', 'y-alignment': 'middle', 'font-weight': 'bold',
-                'fill': 'black', 'font-size': 12,
-                'font-family': 'Candara, Calibri, Segoe, "Segoe UI", Optima, Arial, sans-serif'
-            }
+                'fill': 'black', 'font-size': 12, 'font-family': 'Times New Roman'
+            },
+            '.schema-table-columns-text': {
+                'ref': '.schema-table-columns-rect', 'ref-y': 5, 'ref-x': 5,
+                'fill': 'black', 'font-size': 12, 'font-family': 'Times New Roman'
+            },
         },
 
         name: [],
-        columns: []
+        columns: [],
 
     }, joint.shapes.basic.Generic.prototype.defaults),
 
     initialize: function() {
+
         _.bindAll(this, 'updateRectangles');
 
         this.on('change:name change:columns', function() {
             this.updateRectangles();
-            this.trigger('schema-update');
+        this.trigger('schema-update');
         });
+
         this.updateRectangles();
+
         joint.shapes.basic.Generic.prototype.initialize.apply(this, arguments);
     },
 
-    getTableName: function() {
+    getClassName: function() {
         return this.get('name');
     },
 
     updateRectangles: function() {
+
         var attrs = this.get('attrs');
-        
-        // Set the attributes for the name
-        // The name is 1 line long, so the height is hard-coded to
-        // 40.
-        attrs['.schema-table-name-text'].text = this.getTableName();
-        attrs['.schema-table-name-rect'].height = 40; // hard coded height
-        
-        // update the columns
-        var offsetY = 40;
-        var that = this;
-        for (c in this.getEmbeddedCells()) {
-            cell.translate(2, offsetY);
-            offsetY += cell.size.height;
-        }
+
+        var rects = [
+            { type: 'name', text: this.getClassName() },
+            { type: 'columns', text: this.get('columns') }
+        ];
+
+        var offsetY = 0;
+
+        _.each(rects, function(rect) {
+
+            var lines = _.isArray(rect.text) ? rect.text : [rect.text];
+        var rectHeight = lines.length * 20 + 20;
+
+            attrs['.schema-table-' + rect.type + '-text'].text = lines.join('\n');
+            attrs['.schema-table-' + rect.type + '-rect'].height = rectHeight;
+            attrs['.schema-table-' + rect.type + '-rect'].transform = 'translate(0,'+ offsetY + ')';
+
+            offsetY += rectHeight;
+        });
     }
 
 });
@@ -83,12 +93,13 @@ joint.shapes.schema.Table = joint.shapes.basic.Generic.extend({
 joint.shapes.schema.TableView = joint.dia.ElementView.extend({
 
     initialize: function() {
+
         joint.dia.ElementView.prototype.initialize.apply(this, arguments);
 
-        this.model.on('schema-update', _.bind(function() {
-            this.update();
-            this.resize();
-        }, this));
+    this.model.on('schema-update', _.bind(function() {
+        this.update();
+        this.resize();
+    }, this));
     }
 });
 
@@ -110,63 +121,44 @@ function importfile(graph, filename) {
         var tables = {};
         var columns = {};
         var edges = [];
-        var column_list = [];
         var everything = [];
         
-        $(dom).find('cell').each(function() {
+        $(dom).find('table').each(function() {
             var el;
             var $cel = $(this);
-            //console.log("cell " + $cel.attr("kind") + ", " + $cel.attr("id"));
-            if ($cel.attr("kind") == "table") {
-                el = new joint.shapes.schema.Table({
-                    name: $cel.attr("name")
+            console.log("cell " + $cel.attr("id"));
+            var column_names = [];
+            $cel.find('column').each(function() {
+                var $col = $(this);
+                var name = $col.attr("name");
+                // map the column id to the table id
+                columns[String($col.attr("id"))] = String($cel.attr("id"));
+                column_names.push($col.attr("name"));
+            });
+            el = new joint.shapes.schema.Table({
+                name: $cel.attr("name"),
+                columns: column_names
+            });
+            everything[everything.length] = el;
+            tables[String($cel.attr("id"))] = el;
+        });
+        $(dom).find('edge').each(function() {
+            var $cel = $(this);
+            var src_id = String($cel.attr("source"));
+            var target_id = String($cel.attr("target"));
+            if (!! columns[src_id] && !! columns[target_id]) {
+                var src_table_el = tables[columns[src_id]];
+                var target_table_el = tables[columns[target_id]];
+                var el = new joint.shapes.schema.ForeignKey({
+                    // Should reference columns, but for now
+                    source: { id: src_table_el },
+                    target: { id: target_table_el }
                 });
-                everything[everything.length] = el;
-                tables[String($cel.attr("id"))] = {
-                    name: $cel.attr("name"),
-                    node: el
-                };
-                //console.log("tables[] = " + tables[String($cel.attr("id"))].name);
-            } else if ($cel.attr("kind") == "column") {
-                el = new joint.shapes.schema.Column({
-                    name: $cel.attr("name"),
-                    vtype: $cel.attr("type")
-                });
-                //console.log("-parent "+$cel.attr("parent"));
-                everything[everything.length] = el;
-                var col = {
-                    tableid: String($cel.attr("parent")),
-                    name: $cel.attr("name"),
-                    vtype: $cel.attr("type"),
-                    auto: $cel.attr("autoIncrement"),
-                    node: el
-                };
-                columns[String($cel.attr("id"))] = col;
-                column_list[column_list.length] = col;
-            } else if ($cel.attr("kind") == "edge") {
-                edges.push({
-                    source: String($cel.attr("source")),
-                    target: String($cel.attr("target"))
-                });
+                everything.push(el);
+            } else {
+                console.log(String($cel.attr("id"))+": could not find reference to both "+src_id+" and "+target_id);
             }
         });
-        
-        var i;
-        for (i = 0; i < column_list.length; ++i) {
-            var c = column_list[i];
-            //console.log("c.tableid = " + c.tableid);
-            //console.log("tables[] = " + tables[c.tableid]);
-            tables[c.tableid].node.embed(c.node);
-        }
-        for (i = 0; i < edges.length; ++i) {
-            var e = edges[i];
-            var el = new joint.shapes.schema.ForeignKey({
-                source: { id: columns[e.source].node },
-                target: { id: columns[e.target].node }
-            });
-            everything.push(el);
-        }
-        
         graph.addCells(everything);
     });
 }
@@ -195,7 +187,7 @@ $(document).ready(function () {
     importfile(graph, 'schema.graph.xml');
     
     // layout the boxes
-    joint.layout.DirectedGraph.layout(graph, { setLinkVerticies: false });
+    //joint.layout.DirectedGraph.layout(graph, { setLinkVerticies: false });
 });
     </script>
 </head>
