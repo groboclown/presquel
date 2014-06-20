@@ -13,7 +13,10 @@ output_dir = None
 schema_by_name = {}
 
 PLATFORMS = ['mysql']
-PREPSQL_CONVERTER = lambda a: ':' + a
+
+# FIXME need better implementation when a collection comes in
+def PREPSQL_CONVERTER(a):
+    return ':' + a.name
 
 # TODO create the where clause objects within the file.
 # TODO add extended sql functions.
@@ -70,11 +73,11 @@ def generate_file(analysis_obj):
             
             if len(w.arguments) > 0:
                 for a in w.arguments:
-                    f.write('    public $' + a + ';\n')
+                    f.write('    public $' + a.name + ';\n')
                 f.write('    function __construct(' +
-                    (', '.join(('$' + a) for a in w.arguments)) + ') {\n')
+                    (', '.join(('$' + a.name) for a in w.arguments)) + ') {\n')
                 for a in w.arguments:
-                    f.write('        $this->' + a + ' = $' + a + ';\n')
+                    f.write('        $this->' + a.name + ' = $' + a.name + ';\n')
                 f.write('    }\n')
             f.writelines('\n'.join([
                 '', '',
@@ -82,7 +85,7 @@ def generate_file(analysis_obj):
                 '',
             ]))
             for a in w.arguments:
-                f.write('        $data["' + a + '"] = $this->' + a + ';\n')
+                f.write('        $data["' + a.name + '"] = $this->' + a.name + ';\n')
             f.writelines('\n'.join([
                 '    }', '', ''
                 '    public function __toString() {',
@@ -386,11 +389,11 @@ def generate_create(analysis_obj):
     assert not analysis_obj.is_read_only
 
     create_data = sqlmigration.codegen.CreateQuery(analysis_obj, PLATFORMS,
-                                                   'php')
+                                                   'php', PREPSQL_CONVERTER)
 
-    php_argument_list = [('$' + a)
+    php_argument_list = [('$' + a.name)
                          for a in create_data.required_input_arguments]
-    php_argument_list.extend([('$' + a + ' = false')
+    php_argument_list.extend([('$' + a.name + ' = false')
                               for a in create_data.optional_input_arguments])
 
     # we can have no arguments if the table is essentially just an ID.
@@ -434,7 +437,9 @@ def generate_create(analysis_obj):
         if code is not None:
             ret.append(code)
         for arg in r.get_sql_arguments(True):
-            data_values.append('            \'' + arg + '\' => $' + arg + ',')
+            assert isinstance(arg, sqlmigration.model.SqlArgument)
+            # FIXME use the type and is_collection to generate this
+            data_values.append('            \'' + arg.name + '\' => $' + arg.name + ',')
 
         for wr in create_data.where_values[r]:
             assert isinstance(wr, sqlmigration.codegen.InputValue)
@@ -442,7 +447,8 @@ def generate_create(analysis_obj):
             if code is not None:
                 ret.append(code)
             for arg in wr.get_sql_arguments(True):
-                data_values.append('            \'' + arg + '\' => $' + arg +
+                assert isinstance(arg, sqlmigration.model.SqlArgument)
+                data_values.append('            \'' + arg.name + '\' => $' + arg.name +
                                    ',')
             ret.append('        $where .= \' AND ' + wr.get_sql_value(True) +
                        '\';')
@@ -454,7 +460,7 @@ def generate_create(analysis_obj):
         assert isinstance(r, sqlmigration.codegen.InputValue)
         arguments = create_data.value_arguments[r]
         assert arguments is not None and len(arguments) > 0
-        s1 = ['$' + a + ' !== false' for a in arguments]
+        s1 = ['$' + a.name + ' !== false' for a in arguments]
         s2 = []
         s3 = []
         code = r.get_code_value(True)
@@ -464,7 +470,8 @@ def generate_create(analysis_obj):
         if code is not None:
             s3.append(code)
         for a in r.get_sql_arguments(True):
-            s2.append('            $data[\'' + a + '\'] = $' + a + ';')
+            assert isinstance(a, sqlmigration.model.SqlArgument)
+            s2.append('            $data[\'' + a.name + '\'] = $' + a.name + ';')
             if len(create_data.required_input_values) <= 0:
                 s2.extend([
                     '                if (! $has_columns) {',
@@ -484,7 +491,8 @@ def generate_create(analysis_obj):
                     r.get_sql_value(True) + '\';',
                 ])
         for a in r.get_sql_arguments(False):
-            s3.append('            $data[\'' + a + '\'] = $' + a + ';')
+            assert isinstance(arg, sqlmigration.model.SqlArgument)
+            s3.append('            $data[\'' + a.name + '\'] = $' + a.name + ';')
             if len(create_data.required_input_values) <= 0:
                 s3.extend([
                     '                if (! $has_columns) {',
@@ -510,7 +518,8 @@ def generate_create(analysis_obj):
             if code is not None:
                 s2.append(code)
             for arg in wr.get_sql_arguments(True):
-                s2.append('            $data[\'' + arg + '\'] = $' + arg + ';')
+                assert isinstance(arg, sqlmigration.model.SqlArgument)
+                s2.append('            $data[\'' + arg.name + '\'] = $' + arg.name + ';')
             sv = wr.get_sql_value(True)
             if sv is not None:
                 s2.append('        $where .= \' AND ' + sv + '\';')
@@ -519,7 +528,8 @@ def generate_create(analysis_obj):
             if code is not None:
                 s3.append(code)
             for arg in wr.get_sql_arguments(False):
-                s3.append('            $data[\'' + arg + '\'] = $' + arg + ';')
+                assert isinstance(arg, sqlmigration.model.SqlArgument)
+                s3.append('            $data[\'' + arg.name + '\'] = $' + arg.name + ';')
             sv = wr.get_sql_value(False)
             if sv is not None:
                 s3.append('        $where .= \' AND ' + sv + '\';')
@@ -597,7 +607,7 @@ def generate_create(analysis_obj):
                 update_values[cu.sql_name] = cuvc.sql_args(
                     PLATFORMS, PREPSQL_CONVERTER)
             else:
-                update_values[cu.sql_name] = PREPSQL_CONVERTER(cu.sql_name)
+                update_values[cu.sql_name] = PREPSQL_CONVERTER(cu.name_as_sql_argument)
         ret.extend([
             '',
             '    public function upsert($db, $' +
@@ -627,7 +637,8 @@ def generate_create(analysis_obj):
             if code is not None:
                 ret.append(code)
             for arg in r.get_sql_arguments(True):
-                data_values.append('            \'' + arg + '\' => $' + arg + ',')
+                assert isinstance(arg, sqlmigration.model.SqlArgument)
+                data_values.append('            \'' + arg.name + '\' => $' + arg.name + ',')
         data_values.append('        );')
         ret.extend(data_values)
         
@@ -638,7 +649,7 @@ def generate_create(analysis_obj):
             assert isinstance(r, sqlmigration.codegen.InputValue)
             arguments = create_data.value_arguments[r]
             assert arguments is not None and len(arguments) > 0
-            s1 = ['$' + a + ' !== false' for a in arguments]
+            s1 = ['$' + a.name + ' !== false' for a in arguments]
             s2 = []
             s3 = []
             code = r.get_code_value(True)
@@ -648,6 +659,7 @@ def generate_create(analysis_obj):
             if code is not None:
                 s3.append(code)
             for a in r.get_sql_arguments(True):
+                assert isinstance(a, sqlmigration.model.SqlArgument)
                 if r.column_name in update_values:
                     if len(non_index_required_columns) <= 0:
                         s2.extend([
@@ -661,13 +673,14 @@ def generate_create(analysis_obj):
                               (len(non_index_required_columns) <= 0 and '' or ', ') +
                               r.column_name + ' = ' + update_values[r.column_name] + '\';')
                 s2.extend([
-                    '            $data[\'' + a + '\'] = $' + a + ';'
+                    '            $data[\'' + a.name + '\'] = $' + a.name + ';'
                     '            $sql .= \', ' + r.column_name + '\';',
                     '            $values .= \', ' +
                     r.get_sql_value(True) + '\';',
                 ])
             for a in r.get_sql_arguments(False):
-                s3.append('            $data[\'' + a + '\'] = $' + a + ';')
+                assert isinstance(a, sqlmigration.model.SqlArgument)
+                s3.append('            $data[\'' + a.name + '\'] = $' + a.name + ';')
                 s3.extend([
                     '                $sql .= \', ' + r.column_name + '\';',
                     '                $values .= \', ' +
@@ -727,6 +740,7 @@ def generate_update(analysis_obj):
         assert isinstance(column, sqlmigration.codegen.ColumnAnalysis)
         assert column.update_value is None
         required_argument_names.append(column.sql_name)
+        # FIXME use the converter
         where_ands.append(column.sql_name + ' = :' + column.sql_name)
 
     for column in analysis_obj.columns_for_update:
@@ -742,14 +756,13 @@ def generate_update(analysis_obj):
                 assert column_name_values[column.sql_name] is not None
                 if len(column.update_arguments) > 0:
                     optional_col_args.append(
-                        [column.sql_name, column.update_arguments])
-                    optional_argument_names.extend(column.update_arguments)
+                        [column.sql_name, [a.name for a in column.update_arguments]])
+                    optional_argument_names.extend(a.name for a in column.update_arguments)
                 else:
                     always_column_names.append(column.sql_name)
 
             else:
-                column_name_values[column.sql_name] = PREPSQL_CONVERTER(
-                            column.sql_name)
+                column_name_values[column.sql_name] = PREPSQL_CONVERTER(column.name_as_sql_argument)
                 optional_col_args.append([column.sql_name, [column.sql_name]])
                 optional_argument_names.append(column.sql_name)
 
@@ -870,7 +883,7 @@ def generate_extended_sql(analysis_obj):
         ret.extend([
             '',
             '    public function run' + php_name + '($db' + arg_prefix +
-            (', '.join(('$' + a) for a in extended_sql.arguments)) +
+            (', '.join(('$' + a.name) for a in extended_sql.arguments)) +
             ', $start = -1, $end = -1) {',
             '        $sql = \'' + sqlmigration.codegen.php.escape_php_string(
             extended_sql.sql_args(PLATFORMS, PREPSQL_CONVERTER)) + '\';',
@@ -881,7 +894,8 @@ def generate_extended_sql(analysis_obj):
         ])
         
         for a in extended_sql.arguments:
-            ret.append('            "' + a + '" => $' + a + ',')
+            assert isinstance(a, sqlmigration.model.SqlArgument)
+            ret.append('            "' + a.name + '" => $' + a.name + ',')
         
         ret.extend([
             '        );',

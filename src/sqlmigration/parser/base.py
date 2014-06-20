@@ -5,7 +5,7 @@ from ..model import (SCHEMA_OBJECT_TYPES, CHANGE_TYPES,
                      VIEW_TYPE, View, CONSTRAINT_TYPE, COLUMN_TYPE,
                      Column, SqlConstraint, LanguageConstraint, Constraint,
                      NamedConstraint, WhereClause, ExtendedSql,
-                     ValueTypeValue, SqlString, SqlSet)
+                     ValueTypeValue, SqlString, SqlSet, SqlArgument)
 
 
 class BaseObjectBuilder(object):
@@ -486,10 +486,11 @@ class SchemaParser(object):
                 sql_sets.append(sql.make(ch))
             elif k == 'name':
                 name = v.strip()
-            elif k == 'argument':
-                arguments.append(v.strip())
-            elif k == 'arguments':
-                arguments.extend(self._parse_arguments(k, v))
+            elif k in ['arg', 'argument']:
+                arguments.append(self._parse_argument(v))
+            elif k in ['arguments', 'args']:
+                for ch in self.fetch_dicts_from_list(k, v, ['arg', 'argument']):
+                    arguments.append(self._parse_argument(ch))
             else:
                 self.error("unknown key (" + k + ") set to " + repr(v))
         if len(sql_sets) <= 0:
@@ -524,10 +525,11 @@ class SchemaParser(object):
                 sql_sets.append(sql.make(ch))
             elif k == 'name':
                 name = v.strip()
-            elif k == 'argument':
-                arguments.append(v.strip())
-            elif k == 'arguments':
-                arguments.extend(self._parse_arguments(k, v))
+            elif k in ['arg', 'argument']:
+                arguments.append(self._parse_argument(v))
+            elif k in ['arguments', 'args']:
+                for ch in self.fetch_dicts_from_list(k, v, ['arg', 'argument']):
+                    arguments.append(self._parse_argument(ch))
             # TODO add support for columns if type type is 'query'
             else:
                 self.error("unknown key (" + k + ") set to " + repr(v))
@@ -536,6 +538,35 @@ class SchemaParser(object):
             self.error("no sql or dialects set for extended sql")
         
         return ExtendedSql(name, sql_type, SqlSet(sql_sets, arguments))
+    
+    def _parse_argument(self, d):
+        assert isinstance(d, dict)
+        
+        name = None
+        atype = None
+        is_collection = False
+        
+        for (k, v) in d.items():
+            k = _strip_key(k)
+            if k == 'name':
+                assert isinstance(v, str)
+                assert name is None
+                name = v.strip()
+                assert len(name) > 0
+            elif k == 'type':
+                assert isinstance(v, str)
+                assert atype is None
+                atype = v.strip()
+                assert len(atype) > 0
+        assert name is not None
+        assert atype is not None
+        assert isinstance(atype, str)
+        if atype.startswith("set "):
+            is_collection = True
+            atype = atype[4:].strip()
+            assert len(atype) > 0
+        return SqlArgument(name, atype, is_collection)
+                
 
     def parse_constraint(self, parent_column, d):
         assert isinstance(d, dict)
@@ -598,10 +629,11 @@ class SchemaParser(object):
                 code = v
             elif k == 'name':
                 name = v.strip()
-            elif k == 'argument':
-                arguments.append(v.strip())
-            elif k == 'arguments':
-                arguments.extend(self._parse_arguments(k, v))
+            elif k in ['arg', 'argument']:
+                arguments.append(self._parse_argument(v))
+            elif k in ['arguments', 'args']:
+                for ch in self.fetch_dicts_from_list(k, v, ['arg', 'argument']):
+                    arguments.append(self._parse_argument(ch))
             else:
                 # Custom constraint key/values
                 details[k] = v
@@ -715,26 +747,6 @@ class SchemaParser(object):
                                ' are allowed inside "' + k + '" (found "' +
                                str(kk) + '")')
         return ret
-    
-    def _parse_arguments(self, k, v):
-        arguments = []
-        if isinstance(v, str):
-            arguments.extend([a.strip() for a in v.split(',')])
-        else:
-            d_list = []
-            for c in v:
-                if isinstance(c, str):
-                    arguments.append(c.strip())
-                elif isinstance(c, dict):
-                    d_list.append(c)
-                else:
-                    raise Exception("arguments can be a string, or "
-                                    "contain a list of strings or "
-                                    "dictionaries")
-            for c in self.fetch_dicts_from_list(k, d_list, 'argument'):
-                arguments.append(c.strip())
-        return arguments
-        
 
 
 def _parse_schema_type(type_name):

@@ -136,6 +136,26 @@ class SqlString(object):
         return self.__platforms
 
 
+class SqlArgument(object):
+    def __init__(self, name, basic_type, is_collection = False):
+        object.__init__(self)
+        self.__name = name
+        self.__basic_type = basic_type
+        self.__is_collection = is_collection
+        
+    @property
+    def name(self):
+        return self.__name
+    
+    @property
+    def basic_type(self):
+        return self.__basic_type
+    
+    @property
+    def is_collection(self):
+        return self.__is_collection
+
+
 class SqlSet(object):
     def __init__(self, sql_set, arguments):
         assert ((isinstance(sql_set, tuple) or isinstance(sql_set, list))
@@ -143,8 +163,10 @@ class SqlSet(object):
         if arguments is None:
             arguments = []
         assert (isinstance(arguments, list) or isinstance(arguments, tuple))
+        for a in arguments:
+            assert isinstance(a, SqlArgument)
         self.__sql_set = sql_set
-        self.__arguments = arguments
+        self.__arguments = tuple(arguments)
 
     def get(self):
         return tuple(self.__sql_set)
@@ -176,23 +198,34 @@ class SqlSet(object):
     
     @property
     def arguments(self):
-        return tuple(self.__arguments)
+        return self.__arguments
+    
+    @property
+    def collection_arguments(self):
+        ret = []
+        for a in self.arguments:
+            if a.is_collection:
+                ret.append(a)
+        return ret
 
     def sql_args(self, platforms, arg_converter):
         """
         Return the sql for the given platforms, with the argument values
         replaced, using the function "arg_converter", which takes the argument
         name as input, and outputs the prepared statement replacement string.
+        
+        The outer caller will need to know how to deal with collection
+        arguments, and how those relate to the `arg_converter`.
 
         :param arg_converter:
-        :return:
+        :return str:
         """
         ret = self.get_for_platform(platforms)
         if ret is None:
             return None
         ret = ret.sql
         for a in self.arguments:
-            ret = ret.replace('{' + a + '}', arg_converter(a))
+            ret = ret.replace('{' + a.name + '}', arg_converter(a))
         return ret
 
 

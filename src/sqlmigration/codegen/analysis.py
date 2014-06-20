@@ -1,7 +1,7 @@
 # !/usr/bin/python3
 
 from ..model import (Column, Table, View, SchemaVersion, SchemaObject,
-                     Constraint, SqlConstraint)
+                     Constraint, SqlConstraint, SqlArgument)
 
 
 class AnalysisModel(object):
@@ -468,6 +468,10 @@ class ColumnAnalysis(SchemaAnalysis):
 
         for c in self.__constraints_analysis:
             c.update_references(analysis_model)
+    
+    @property
+    def name_as_sql_argument(self):
+        return SqlArgument(self.sql_name, self.schema.value_type, False)
 
     @property
     def create_arguments(self):
@@ -484,7 +488,7 @@ class ColumnAnalysis(SchemaAnalysis):
         elif self.create_value is not None:
             return getattr(self.create_value, 'arguments', [])
         else:
-            return [self.schema.name]
+            return [self.name_as_sql_argument]
 
     @property
     def update_arguments(self):
@@ -497,7 +501,7 @@ class ColumnAnalysis(SchemaAnalysis):
         elif self.update_value is not None:
             return self.create_value.arguments
         else:
-            return [self.schema.name]
+            return [self.name_as_sql_argument]
 
 
 class TopAnalysis(SchemaAnalysis):

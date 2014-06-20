@@ -7,6 +7,7 @@ from .analysis import (ProcessedForeignKeyConstraint, ColumnAnalysis,
                        ColumnSetAnalysis, AbstractProcessedConstraint)
 from ..model import (SqlConstraint, SqlSet, Table, View, Column,
                      LanguageConstraint)
+from sqlmigration.model.base import SqlArgument
 
 
 class ReadQueryData(object):
@@ -139,12 +140,11 @@ class InputValue(object):
 
     @staticmethod
     def create_specified_constraint(column, is_required, is_where_clause,
-                                    constraint, platforms, language):
+                                    constraint, platforms, language,
+                                    arg_converter):
         # FIXME in the future, this will need to use the unified type
         if isinstance(constraint, SqlConstraint):
-            # FIXME use an arg converter that is specific to the
-            # language.  This right now is PHP.
-            sql = constraint.sql_args(platforms, lambda a: ':' + a)
+            sql = constraint.sql_args(platforms, arg_converter)
             sql_args = constraint.arguments
             return InputValue.create_specified(
                 column, is_required, is_where_clause, None, [], sql, sql_args)
@@ -158,12 +158,11 @@ class InputValue(object):
 
     @staticmethod
     def create_default_constraint(column, is_required, is_where_clause,
-                                  constraint, platforms, language):
+                                  constraint, platforms, language,
+                                  arg_converter):
         # FIXME in the future, this will need to use the unified type
         if isinstance(constraint, SqlConstraint):
-            # FIXME use an arg converter that is specific to the
-            # language.  This right now is PHP.
-            sql = constraint.sql_args(platforms, lambda a: ':' + a)
+            sql = constraint.sql_args(platforms, arg_converter)
             sql_args = constraint.arguments
             return InputValue.create_default(
                 column, is_required, is_where_clause, None, [], sql, sql_args)
@@ -199,13 +198,24 @@ class InputValue(object):
         self.is_where_clause = is_where_clause
 
         self.__is_required = is_required
-        self.__specified_code_args = tuple(specified_code_args or [])
+        
+        def args_to_tuple(args):
+            sca = []
+            if args is not None:
+                for a in args:
+                    if isinstance(a, str):
+                        a = SqlArgument(a, column.schema.value_type, False)
+                    assert isinstance(a, SqlArgument)
+                    sca.append(a)
+            return tuple(sca)
+            
+        self.__specified_code_args = args_to_tuple(specified_code_args)
         self.__specified_code = specified_code
-        self.__default_code_args = tuple(default_code_args or [])
+        self.__default_code_args = args_to_tuple(default_code_args)
         self.__default_code = default_code
-        self.__specified_sql_args = tuple(specified_sql_args or [])
+        self.__specified_sql_args = args_to_tuple(specified_sql_args)
         self.__specified_sql = specified_sql
-        self.__default_sql_args = tuple(default_sql_args or [])
+        self.__default_sql_args = args_to_tuple(default_sql_args)
         self.__default_sql = default_sql
 
         # Validation: the default arguments must be, at most, within the
@@ -218,8 +228,8 @@ class InputValue(object):
     def get_code_arguments(self, is_specified):
         """
 
-        :return: the list of arguments that the program passes to the
-            code_value text.  The code, if given, will generate as output
+        :return: the list of arguments (SqlArgument) that the program passes to
+            the code_value text.  The code, if given, will generate as output
             the sql input arguments.
         """
         if is_specified:
@@ -230,8 +240,8 @@ class InputValue(object):
     def get_sql_arguments(self, is_specified):
         """
 
-        :return: the list of arguments that the program passes into the
-            prepared statement.
+        :return: the list of arguments (SqlArgument) that the program passes
+            into the prepared statement.
         """
         if is_specified:
             return self.__specified_sql_args
@@ -275,7 +285,9 @@ class InputValue(object):
 
 
 class UpdateCreateQuery(object):
-    def __init__(self, analysis_obj, platforms, language):
+    def __init__(self, analysis_obj, platforms, language, arg_converter):
+        self.arg_converter = arg_converter
+
         columns = self._get_columns_for(analysis_obj)
 
         # list of all the (code) input arguments required
@@ -427,8 +439,9 @@ class CreateQuery(UpdateCreateQuery):
     and the constraints.
     """
 
-    def __init__(self, analysis_obj, platforms, language):
-        UpdateCreateQuery.__init__(self, analysis_obj, platforms, language)
+    def __init__(self, analysis_obj, platforms, language, arg_converter):
+        UpdateCreateQuery.__init__(self, analysis_obj, platforms, language,
+                                   arg_converter)
         assert isinstance(analysis_obj, ColumnSetAnalysis)
 
         # names of columns that the database creates.
@@ -476,5 +489,5 @@ class CreateQuery(UpdateCreateQuery):
 
                 ret.append(InputValue.create_specified_constraint(
                     column, True, is_where_clause, v.constraint, platforms,
-                    language))
+                    language, self.arg_converter))
         return ret
