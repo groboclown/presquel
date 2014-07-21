@@ -4,8 +4,8 @@ SQL Migration
 This tool allows for automation around version controlled changes to a database
 schema.
 
-The tool allows for describing the current state of the database schema, and
-inserting into that description the operations necessary to migrate from the
+With it, you can describe the current state of the database schema, and
+insert into that description the operations necessary to migrate from the
 previous version to the current state.
 
 Keeping the state visible at the "head" revision for each version means that
@@ -17,7 +17,8 @@ into a single file can make unreadable and unmaintainable code.
 Additionally, because the tool constructs an object representation of the
 database schema, it can construct low-level database interaction code
 automatically, by utilizing the extended meta-data information that's located
-with the schema definition.
+with the schema definition.  This allows for keeping all database actions
+and usages without needing to search through code.
 
 This tool was heavily influenced by [Liquibase](http://www.liquibase.org).
 However, Liquibase solves the problem of incremental updates to a live database,
