@@ -58,6 +58,7 @@ def generate_file(analysis_obj):
                 '}',
                 '', ''
             ]))
+            
         
         for w in analysis_obj.schema.where_clauses:
             assert isinstance(w, sqlmigration.model.WhereClause)
@@ -104,8 +105,32 @@ def generate_file(analysis_obj):
             ' * Generated on ' + time.asctime(time.gmtime(time.time())),
             ' */',
             'class ' + class_name + ' extends ' + parent_class + ' {',
-            '    public static $INSTANCE;', '',
+            '    public static $INSTANCE;',
+            '    public static $TABLENAME = "' + sql_name + '";',
+            '',
+            '    public function writeLockTable($db, $invoker) {',
+            '        return $this->lockTable($db, $invoker, "' + sql_name +
+                    ' WRITE");',
+            '    }',
+            '',
+            '    public function readLockTable($db, $invoker) {',
+            '        return $this->lockTable($db, $invoker, "' + sql_name +
+                    ' READ");',
+            '    }',
+            '',
+            '    public function writeLockTables($db, $tables, $invoker) {',
+            '        assert(sizeof($tables) > 0);',
+            '        return $this->lockTable($db, $invoker, implode(" WRITE, ", $tables)." WRITE");',
+            '    }',
+            '',
+            '    public function readLockTables($db, $tables, $invoker) {',
+            '        assert(sizeof($tables) > 0);',
+            '        return $this->lockTable($db, $invoker, implode(" READ, ", $tables)." READ");',
+            '    }',
+            '',
         ]))
+        
+        
         f.write('\n'.join(generate_read(analysis_obj)))
 
         if not analysis_obj.is_read_only:
@@ -115,7 +140,6 @@ def generate_file(analysis_obj):
             f.writelines(line + '\n' for line in generate_delete(
                 analysis_obj))
         
-        # FIXME add extended sql creation
         f.writelines('\n'.join(generate_extended_sql(analysis_obj)))
 
         f.writelines('\n'.join(generate_validations(
@@ -140,6 +164,40 @@ def generate_file(analysis_obj):
             '        //$stmt->close();',
             '        return $ret;',
             '    }', '',
+            '',
+            '    private function lockTable($db, $invoker, $locks) {',
+            '        $stmt = $db->prepare("LOCK TABLES ".$locks);',
+            '        $stmt->execute($data);',
+            '        $errs = $stmt->errorInfo();',
+            '        if ($errs[1] !== null) {',
+            '            return $this->createReturn($stmt, null);',
+            '        }',
+            '        $except = null;',
+            '        $ret = null;',
+            '        try {',
+            '            $ret = $invoker();',
+            '        } catch (Exception $e) {',
+            '            $except = $e;',
+            '        }',
+            '        $stmt = $db->prepare("UNLOCK TABLES");',
+            '        $stmt->execute($data);',
+            '        $errs = $stmt->errorInfo();',
+            # Regardless of whether the unlock caused an error or not, use
+            # the top-level invoker error as the return, if it had an error.
+            '        if ($except !== null) {',
+            '            throw $except;',
+            '        }',
+            '        if ($ret !== null && $ret["haserror"]) {',
+            '            return $ret;',
+            '        }',
+            # IF there was an error only in the unocking, then return that as
+            # the error.
+            '        if ($errs[1] !== null) {',
+            '            return $this->createReturn($stmt, null);',
+            '        }',
+            '        return $ret;',
+            '    }',
+            '',
             '}',
             class_name + '::$INSTANCE = new ' + class_name + ';',
             ''
@@ -984,6 +1042,13 @@ def generate_validations(analysis_obj):
     ret.extend(read_validates)
     ret.extend(write_validates)
     ret.extend(table_validates)
+    
+    ret.extend(['    private function finalCheck($ret) {',
+                # FIXME
+                '        return $ret;',
+                '    }',
+                ''])
+    
     return ret
 
 

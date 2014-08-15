@@ -2,11 +2,10 @@
 Converts the model to an XML format that can be used to generate a graph.
 '''
 
-from ..model import (ColumnarSchemaObject, Column)
+from ..model import (ColumnarSchemaObject, Column, View, Table)
 from . import (AnalysisModel, ColumnSetAnalysis, ColumnAnalysis,
                ProcessedForeignKeyConstraint)
 from xml.dom.minidom import getDOMImplementation
-from sqlmigration.model.schema import View, Table
 
 def generate_graph_xml(amodel):
     assert isinstance(amodel, AnalysisModel)

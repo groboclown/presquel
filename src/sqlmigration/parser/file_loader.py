@@ -36,7 +36,7 @@ def find_version_dirs(root_dir):
     these as a list of tuples (version_number, version_dir)
 
     :param root_dir:
-    :return:
+    :return tuple: list of (dir index, full directory name)
     """
 
     print("DEBUG: find_version_dirs("+repr(root_dir)+")")
@@ -68,7 +68,7 @@ def parse_versions(root_dir):
         schemas = []
         for file_name in find_files_for_version(version_dir):
             (root, ext) = os.path.splitext(file_name)
-            if ext:
+            if ext and len(ext) > 0:
                 ext = ext.lower()
                 if ext in PARSERS_BY_EXTENSION:
                     print("DEBUG: " + file_name)
