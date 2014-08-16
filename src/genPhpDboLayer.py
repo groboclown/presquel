@@ -167,7 +167,7 @@ def generate_file(analysis_obj):
             '',
             '    private function lockTable($db, $invoker, $locks) {',
             '        $stmt = $db->prepare("LOCK TABLES ".$locks);',
-            '        $stmt->execute($data);',
+            '        $stmt->execute();',
             '        $errs = $stmt->errorInfo();',
             '        if ($errs[1] !== null) {',
             '            return $this->createReturn($stmt, null);',
@@ -180,7 +180,7 @@ def generate_file(analysis_obj):
             '            $except = $e;',
             '        }',
             '        $stmt = $db->prepare("UNLOCK TABLES");',
-            '        $stmt->execute($data);',
+            '        $stmt->execute();',
             '        $errs = $stmt->errorInfo();',
             # Regardless of whether the unlock caused an error or not, use
             # the top-level invoker error as the return, if it had an error.
@@ -1042,12 +1042,6 @@ def generate_validations(analysis_obj):
     ret.extend(read_validates)
     ret.extend(write_validates)
     ret.extend(table_validates)
-    
-    ret.extend(['    private function finalCheck($ret) {',
-                # FIXME
-                '        return $ret;',
-                '    }',
-                ''])
     
     return ret
 
