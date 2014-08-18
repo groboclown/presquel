@@ -316,7 +316,7 @@ class ExtendedSql(object):
     
     TODO these should add possible column definitions for QUERY types.
     """
-    def __init__(self, name, sql_type, sqlset):
+    def __init__(self, name, sql_type, sqlset, post_sqlset):
         """
         :param str name:
         :param str sql_type: the type of sql being performed in the operation
@@ -327,9 +327,19 @@ class ExtendedSql(object):
         assert isinstance(sql_type, str)
         assert isinstance(sqlset, SqlSet)
         
+        # FIXME this is parsing that should be done elsewhere
+        sql_type = sql_type.strip().lower()
+        if sql_type == 'wrapper':
+            assert isinstance(post_sqlset, SqlSet)
+            self.__is_wrapper = True
+        else:
+            assert post_sqlset is None
+            self.__is_wrapper = False
+        
         self.__name = name
         self.__sql_type = sql_type
         self.__sqlset = sqlset
+        self.__post_sqlset = post_sqlset
     
     @property
     def name(self):
@@ -340,8 +350,24 @@ class ExtendedSql(object):
         return self.__sql_type
     
     @property
+    def is_wrapper(self):
+        return self.__is_wrapper
+    
+    @property
     def sql(self):
+        """
+        In the case of the "wrapper" sql_type, this is the pre-execution
+        sql.  In all other cases, this is the actual sql to run. 
+        """
         return self.__sqlset
+    
+    @property
+    def post_sql(self):
+        """
+        This is the sql to run in the post-execution for the "wrapper" sql_type,
+        and None in all other cases.
+        """
+        return self.__post_sqlset
     
     @property
     def arguments(self):
@@ -357,6 +383,14 @@ class ExtendedSql(object):
         :return:
         """
         return self.sql.sql_args(platforms, arg_converter)
+    
+    def post_sql_args(self, platforms, arg_converter):
+        """
+        
+        """
+        assert self.is_wrapper
+        return self.post_sql.sql_args(platforms, arg_converter)
+    
 
 
 class ColumnarSchemaObject(SchemaObject):

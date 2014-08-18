@@ -67,9 +67,10 @@ class NameSpaceObjectBuilder(BaseObjectBuilder):
             self.table_space = str(v).strip()
         elif k == 'constraints':
             for ch in self._parser.fetch_dicts_from_list(k, v, 'constraint'):
-                # FIXME this could be bad - name may not be parsed yet
-                if self.name is None:
-                    print("** WARNING: parsing constraint before name is known")
+                # this could be bad - name may not be parsed yet, but it doesn't
+                # seem to be an issue.
+                #if self.name is None:
+                #    print("** WARNING: parsing constraint before name is known")
                 self.constraints.append(self._parser.parse_constraint(
                     self.name, ch))
         else:
@@ -402,6 +403,7 @@ class SchemaParser(object):
             return SqlChange(change_obj.order, change_obj.comment, schema_type,
                              SqlSet(sql_set, None))
         else:
+            # FIXME this is a bug
             return Change(change_obj.order, change_obj.comment, schema_type,
                           change_type)
 
@@ -503,6 +505,7 @@ class SchemaParser(object):
 
         name = None
         sql_sets = []
+        post_sql_sets = []
         sql_type = None
         arguments = []
         
@@ -510,12 +513,17 @@ class SchemaParser(object):
             if k in ['schematype', 'type', 'operation']:
                 assert isinstance(v, str)
                 sql_type = v.strip()
-            elif k == 'dialects':
+            elif k in ['dialects', 'pre_dialects', 'pre']:
                 for ch in self.fetch_dicts_from_list(
                         k, v, ['dialect']):
                     sql = SqlStatementBuilder()
                     sql_sets.append(sql.make(ch))
-            elif k in ['statement', 'sql', 'query', 'execute']:
+            elif k in ['post_dialects', 'post']:
+                for ch in self.fetch_dicts_from_list(
+                        k, v, ['dialect']):
+                    sql = SqlStatementBuilder()
+                    post_sql_sets.append(sql.make(ch))
+            elif k in ['statement', 'sql', 'query', 'execute', 'pre_sql']:
                 ch = {
                     'syntax': 'universal',
                     'platforms': 'all',
@@ -523,6 +531,14 @@ class SchemaParser(object):
                 }
                 sql = SqlStatementBuilder()
                 sql_sets.append(sql.make(ch))
+            elif k in ['post_sql']:
+                ch = {
+                    'syntax': 'universal',
+                    'platforms': 'all',
+                    sql: v
+                }
+                sql = SqlStatementBuilder()
+                post_sql_sets.append(sql.make(ch))
             elif k == 'name':
                 name = v.strip()
             elif k in ['arg', 'argument']:
@@ -537,7 +553,11 @@ class SchemaParser(object):
         if len(sql_sets) <= 0:
             self.error("no sql or dialects set for extended sql")
         
-        return ExtendedSql(name, sql_type, SqlSet(sql_sets, arguments))
+        post = None
+        if len(post_sql_sets) > 0:
+            post = SqlSet(post_sql_sets, arguments)
+        
+        return ExtendedSql(name, sql_type, SqlSet(sql_sets, arguments), post)
     
     def _parse_argument(self, d):
         assert isinstance(d, dict)

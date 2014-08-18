@@ -106,27 +106,6 @@ def generate_file(analysis_obj):
             ' */',
             'class ' + class_name + ' extends ' + parent_class + ' {',
             '    public static $INSTANCE;',
-            '    public static $TABLENAME = "' + sql_name + '";',
-            '',
-            '    public function writeLockTable($db, $invoker) {',
-            '        return $this->lockTable($db, $invoker, "' + sql_name +
-                    ' WRITE");',
-            '    }',
-            '',
-            '    public function readLockTable($db, $invoker) {',
-            '        return $this->lockTable($db, $invoker, "' + sql_name +
-                    ' READ");',
-            '    }',
-            '',
-            '    public function writeLockTables($db, $tables, $invoker) {',
-            '        assert(sizeof($tables) > 0);',
-            '        return $this->lockTable($db, $invoker, implode(" WRITE, ", $tables)." WRITE");',
-            '    }',
-            '',
-            '    public function readLockTables($db, $tables, $invoker) {',
-            '        assert(sizeof($tables) > 0);',
-            '        return $this->lockTable($db, $invoker, implode(" READ, ", $tables)." READ");',
-            '    }',
             '',
         ]))
         
@@ -164,40 +143,6 @@ def generate_file(analysis_obj):
             '        //$stmt->close();',
             '        return $ret;',
             '    }', '',
-            '',
-            '    private function lockTable($db, $invoker, $locks) {',
-            '        $stmt = $db->prepare("LOCK TABLES ".$locks);',
-            '        $stmt->execute();',
-            '        $errs = $stmt->errorInfo();',
-            '        if ($errs[1] !== null) {',
-            '            return $this->createReturn($stmt, null);',
-            '        }',
-            '        $except = null;',
-            '        $ret = null;',
-            '        try {',
-            '            $ret = $invoker();',
-            '        } catch (Exception $e) {',
-            '            $except = $e;',
-            '        }',
-            '        $stmt = $db->prepare("UNLOCK TABLES");',
-            '        $stmt->execute();',
-            '        $errs = $stmt->errorInfo();',
-            # Regardless of whether the unlock caused an error or not, use
-            # the top-level invoker error as the return, if it had an error.
-            '        if ($except !== null) {',
-            '            throw $except;',
-            '        }',
-            '        if ($ret !== null && $ret["haserror"]) {',
-            '            return $ret;',
-            '        }',
-            # IF there was an error only in the unocking, then return that as
-            # the error.
-            '        if ($errs[1] !== null) {',
-            '            return $this->createReturn($stmt, null);',
-            '        }',
-            '        return $ret;',
-            '    }',
-            '',
             '}',
             class_name + '::$INSTANCE = new ' + class_name + ';',
             ''
@@ -938,42 +883,95 @@ def generate_extended_sql(analysis_obj):
         arg_prefix = ''
         if len(extended_sql.arguments) > 0:
             arg_prefix = ', '
-        ret.extend([
-            '',
-            '    public function run' + php_name + '($db' + arg_prefix +
-            (', '.join(('$' + a.name) for a in extended_sql.arguments)) +
-            ', $start = -1, $end = -1) {',
-            '        $sql = \'' + sqlmigration.codegen.php.escape_php_string(
-            extended_sql.sql_args(PLATFORMS, PREPSQL_CONVERTER)) + '\';',
-            '        if ($start >= 0 && $end > 0) {',
-            '            $sql .= \' LIMIT \'.$start.\',\'.$end;',
-            '        }',
-            '        $data = array(',
-        ])
+        funcdecl_str = (php_name + '($db' + arg_prefix +
+            (', '.join(('$' + a.name) for a in extended_sql.arguments)))
         
+        data = [
+                '        $data = array(',
+            ]
+            
         for a in extended_sql.arguments:
             assert isinstance(a, sqlmigration.model.SqlArgument)
-            ret.append('            "' + a.name + '" => $' + a.name + ',')
+            data.append('            "' + a.name + '" => $' + a.name + ',')
+        data.append("        );")
         
-        ret.extend([
-            '        );',
-            '        $stmt = $db->prepare($sql);',
-            '        $stmt->setFetchMode(PDO::FETCH_ASSOC);',
-            '        $stmt->execute($data);',
-            # No validation can be performed with the results, because we don't know
-            # what's in the results.
-            '        return $this->createReturn($stmt, function ($s) {',
-        ])
-        if extended_sql.sql_type == 'query':
-            ret.append('            return $s->fetchAll();')
-        elif extended_sql.sql_type in ['id', 'count']:
-            ret.append('            return intval($s->fetchColumn);')
+        
+        if extended_sql.is_wrapper:
+            ret.extend([
+                '',
+                '    public function wrap' + funcdecl_str +
+                    ', $invoker_arg, $invoker) {'
+                ])
+            ret.extend(data)
+            ret.extend([
+                '        $sql = \'' + sqlmigration.codegen.php.escape_php_string(
+                extended_sql.sql_args(PLATFORMS, PREPSQL_CONVERTER)) + '\';',
+                '        $stmt = $db->prepare($sql);',
+                '        $stmt->execute($data);',
+                '        $errs = $stmt->errorInfo();',
+                '        if ($errs[1] !== null) {',
+                '            return $this->createReturn($stmt, null);',
+                '        }',
+                '        $except = null;',
+                '        $ret = null;',
+                '        try {',
+                '            $ret = $invoker($db, $invoker_arg);',
+                '        } catch (Exception $e) {',
+                '            $except = $e;',
+                '        }',
+                '        $sql = \'' + sqlmigration.codegen.php.escape_php_string(
+                extended_sql.post_sql_args(PLATFORMS, PREPSQL_CONVERTER)) + '\';',
+                '        $stmt = $db->prepare($sql);',
+                '        $stmt->execute($data);',
+                '        $errs = $stmt->errorInfo();',
+                # Regardless of whether the unlock caused an error or not, use
+                # the top-level invoker error as the return, if it had an error.
+                '        if ($except !== null) {',
+                '            throw $except;',
+                '        }',
+                '        if ($ret !== null && $ret["haserror"]) {',
+                '            return $ret;',
+                '        }',
+                # IF there was an error only in the unocking, then return that as
+                # the error.
+                '        if ($errs[1] !== null) {',
+                '            return $this->createReturn($stmt, null);',
+                '        }',
+                '        return $ret;',
+                '    }', '', '',
+                ])
         else:
-            ret.append('            return true;')
-        ret.extend([
-            '        });',
-            '    }', '', '',
-        ])
+            ret.extend([
+                '',
+                '    public function run' + funcdecl_str +
+                    ', $start = -1, $end = -1) {',
+                '        $sql = \'' + sqlmigration.codegen.php.escape_php_string(
+                extended_sql.sql_args(PLATFORMS, PREPSQL_CONVERTER)) + '\';',
+                '        if ($start >= 0 && $end > 0) {',
+                '            $sql .= \' LIMIT \'.$start.\',\'.$end;',
+                '        }',
+            ])
+            
+            ret.extend(data)
+            
+            ret.extend([
+                '        $stmt = $db->prepare($sql);',
+                '        $stmt->setFetchMode(PDO::FETCH_ASSOC);',
+                '        $stmt->execute($data);',
+                # No validation can be performed with the results, because we don't know
+                # what's in the results.
+                '        return $this->createReturn($stmt, function ($s) {',
+            ])
+            if extended_sql.sql_type == 'query':
+                ret.append('            return $s->fetchAll();')
+            elif extended_sql.sql_type in ['id', 'count']:
+                ret.append('            return intval($s->fetchColumn);')
+            else:
+                ret.append('            return true;')
+            ret.extend([
+                '        });',
+                '    }', '', '',
+            ])
     
     return ret
 
