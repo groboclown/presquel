@@ -59,7 +59,7 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
 
         sql += ' (\n'
         first = True
-        for col in table.columns:
+        for col in table.__columns:
             if first:
                 first = False
                 sql += '    '
@@ -351,7 +351,7 @@ def _generate_base_constraints(table, columns, ct):
     elif ct.constraint_type == 'foreignkey':
         assert name is not None
         if (('column' not in ct.details and
-                'columns' not in ct.details) or
+                '__columns' not in ct.details) or
                 'table' not in ct.details):
             raise Exception("column and table must be in foreign "
                             "key; found in " + column_names + " in " +
@@ -362,9 +362,9 @@ def _generate_base_constraints(table, columns, ct):
                           _parse_name(ct.details['table']) + ' ('
         if 'column' in ct.details:
             constraint_sql += _parse_name(ct.details['column'])
-        elif 'columns' in ct.details:
+        elif '__columns' in ct.details:
             constraint_sql += ",".join(
-                _parse_name(fc) for fc in ct.details['columns'])
+                _parse_name(fc) for fc in ct.details['__columns'])
         else:
             raise Exception("no column definition for foreignkey")
         constraint_sql += ')'

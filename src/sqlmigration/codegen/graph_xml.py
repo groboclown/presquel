@@ -2,8 +2,8 @@
 Converts the model to an XML format that can be used to generate a graph.
 '''
 
-from ..model import (ColumnarSchemaObject, Column, View, Table)
-from . import (AnalysisModel, ColumnSetAnalysis, ColumnAnalysis,
+from ..model.schema import (ColumnarSchemaObject, Column, View, Table)
+from .analysis import (AnalysisModel, ColumnSetAnalysis, ColumnAnalysis,
                ProcessedForeignKeyConstraint)
 from xml.dom.minidom import getDOMImplementation
 
@@ -17,7 +17,7 @@ def generate_graph_xml(amodel):
         assert isinstance(ant, ColumnSetAnalysis)
         if isinstance(t, ColumnarSchemaObject):
             t_el = data.mk_table(t)
-            for c in t.columns:
+            for c in t.__columns:
                 assert isinstance(c, Column)
                 anc = ant.get_column_analysis(c)
                 data.mk_column(t_el, t, anc)
@@ -56,7 +56,7 @@ class GraphData(object):
              None, "schemagraph", None)
         self.root = self.doc.documentElement
         self.tables = {}
-        self.columns = {}
+        self.__columns = {}
         
         self._next_cell_id = 0
     
@@ -72,7 +72,7 @@ class GraphData(object):
     
     def mk_table(self, table_obj):
         """
-        Make just the table cell, not the columns
+        Make just the table cell, not the __columns
         """
         assert isinstance(table_obj, ColumnarSchemaObject)
         
@@ -94,7 +94,7 @@ class GraphData(object):
         assert isinstance(column_obj, ColumnAnalysis)
         
         (cid, el) = self._mk_basic('column', parent_el)
-        self.columns[column_obj] = cid
+        self.__columns[column_obj] = cid
         
         el.setAttribute('name', str(column_obj.sql_name))
         el.setAttribute('type', str(column_obj.schema.value_type))
@@ -110,13 +110,13 @@ class GraphData(object):
         assert isinstance(target_table, ColumnSetAnalysis)
         assert isinstance(target_col, ColumnAnalysis)
         
-        if src_col not in self.columns or target_col not in self.columns:
+        if src_col not in self.__columns or target_col not in self.__columns:
             print("No such foreign key: from " + src_col.sql_name + " to " +
                   target_col.sql_name)
             return
         
-        src_id = self.columns[src_col]
-        target_id = self.columns[target_col]
+        src_id = self.__columns[src_col]
+        target_id = self.__columns[target_col]
         
         el = self._mk_basic('edge')[1]
         el.setAttribute('source', str(src_id))

@@ -5,9 +5,10 @@ Helper utility for the generation of SQL from the analysis.
 
 from .analysis import (ProcessedForeignKeyConstraint, ColumnAnalysis,
                        ColumnSetAnalysis, AbstractProcessedConstraint)
-from ..model import (SqlConstraint, SqlSet, Table, View, Column,
+from ..model.schema import (SqlConstraint, Table, View, Column,
                      LanguageConstraint)
-from sqlmigration.model.base import SqlArgument
+from ..model.base import (SqlSet, SqlArgument, LanguageSet, LanguageArgument,
+                          SqlString)
 
 
 class ReadQueryData(object):
@@ -71,33 +72,33 @@ class ReadQueryData(object):
         # TODO add optional where clauses.  These will be in the top analysis
 
         fki = 0
-        for fk in analysis_obj.foreign_keys_analysis:
-            assert isinstance(fk, ProcessedForeignKeyConstraint)
+        for fkey in analysis_obj.foreign_keys_analysis:
+            assert isinstance(fkey, ProcessedForeignKeyConstraint)
             # Even if the foreign key is an "owner" for this table, we can pull
             # it in if the declaration says so.
-            if fk.join:
+            if fkey.join:
                 # Explicit desire to always join on this foreign table.
                 fki += 1
                 fk_name = 'k' + str(fki)
 
-                column_analysis = analysis_obj.get_column_analysis(fk.column)
+                column_analysis = analysis_obj.get_column_analysis(fkey.column)
                 assert isinstance(column_analysis, ColumnAnalysis)
                 if column_analysis.is_nullable:
                     join_clause += ' LEFT OUTER JOIN '
                 else:
                     join_clause += ' INNER JOIN '
-                join_clause += (fk.fk_table_name + ' ' + fk_name + ' ON ' +
-                                fk_name + '.' + fk.fk_column_name + ' = ' +
-                                analysis_obj.sql_name + '.' + fk.column_name)
-                if fk.remote_table is not None:
-                    rt = fk.remote_table
-                    assert (isinstance(rt, Table) or
-                            isinstance(rt, View))
-                    for fcol in rt.columns:
+                join_clause += (fkey.fk_table_name + ' ' + fk_name + ' ON ' +
+                                fk_name + '.' + fkey.fk_column_name + ' = ' +
+                                analysis_obj.sql_name + '.' + fkey.column_name)
+                if fkey.remote_table is not None:
+                    rtab = fkey.remote_table
+                    assert (isinstance(rtab, Table) or
+                            isinstance(rtab, View))
+                    for fcol in rtab.__columns:
                         assert isinstance(fcol, Column)
-                        query_name = fk.fk_table_name + '__' + fcol.name
+                        query_name = fkey.fk_table_name + '__' + fcol.name
                         col_names.append(query_name)
-                        col_query.append(fk.fk_table_name + '.' + fcol.name +
+                        col_query.append(fkey.fk_table_name + '.' + fcol.name +
                                          ' AS ' + query_name)
 
         from_clause = ' FROM ' + analysis_obj.sql_name + join_clause
@@ -125,98 +126,82 @@ class ReadQueryData(object):
 
 
 class InputValue(object):
+    """
+    Defines how the code should generate SQL that may require the language
+    to dynamically construct the SQL, an/or SQL that has parameterized
+    arguments.
+
+    This is used by the converter.PrepSqlConverter to generate code.
+    """
 
     @staticmethod
-    def create_specified(column, is_required, is_where_clause, code, code_args,
-                         sql, sql_args):
-        return InputValue(column, is_required, is_where_clause, code_args,
-                          code, [], None, sql_args, sql, [], None)
+    def create_direct_value(column, is_required, is_where_clause):
+        sql_str = "{" + column.sql_name + "}"
+        if is_where_clause:
+           sql_str = column.sql_name + " = " + sql_str
+        sstr = SqlString(sql_str, "universal", [ "any" ])
+        sql = SqlSet(sstr, column.name_as_sql_argument)
+        return InputValue(column, is_required, is_where_clause,
+            None, None, sql, None)
 
     @staticmethod
-    def create_default(column, is_required, is_where_clause, code, code_args,
-                       sql, sql_args):
-        return InputValue(column, is_required, is_where_clause, [], None,
-                          code_args, code, [], None, sql_args, sql)
+    def create_specified(column, is_required, is_where_clause, code, sql):
+        return InputValue(column, is_required, is_where_clause, code, None,
+            sql, None)
+
+    @staticmethod
+    def create_default(column, is_required, is_where_clause, code, sql):
+        return InputValue(column, is_required, is_where_clause, None, code,
+            None, sql)
 
     @staticmethod
     def create_specified_constraint(column, is_required, is_where_clause,
-                                    constraint, platforms, language,
-                                    arg_converter):
+            constraint):
         # FIXME in the future, this will need to use the unified type
         if isinstance(constraint, SqlConstraint):
-            sql = constraint.sql_args(platforms, arg_converter)
-            sql_args = constraint.arguments
             return InputValue.create_specified(
-                column, is_required, is_where_clause, None, [], sql, sql_args)
+                column, is_required, is_where_clause, None, constraint.sql)
         elif isinstance(constraint, LanguageConstraint):
-            code = constraint.code_for_language(language)
-            code_args = constraint.arguments
             return InputValue.create_specified(
-                column, is_required, is_where_clause, code, code_args, None, [])
+                column, is_required, is_where_clause, constraint.code, None)
         else:
             raise Exception("Unknown kind of value constraint")
 
     @staticmethod
     def create_default_constraint(column, is_required, is_where_clause,
-                                  constraint, platforms, language,
-                                  arg_converter):
+            constraint):
         # FIXME in the future, this will need to use the unified type
         if isinstance(constraint, SqlConstraint):
-            sql = constraint.sql_args(platforms, arg_converter)
-            sql_args = constraint.arguments
             return InputValue.create_default(
-                column, is_required, is_where_clause, None, [], sql, sql_args)
+                column, is_required, is_where_clause, None, constraint.sql)
         elif isinstance(constraint, LanguageConstraint):
-            code = constraint.code_for_language(language)
-            code_args = constraint.arguments
             return InputValue.create_default(
-                column, is_required, is_where_clause, code, code_args, None, [])
+                column, is_required, is_where_clause, constraint.code, None)
         else:
             raise Exception("Unknown kind of value constraint")
 
     def __init__(self, column, is_required, is_where_clause,
-                 specified_code_args, specified_code,
-                 default_code_args, default_code,
-                 specified_sql_args, specified_sql, default_sql_args,
-                 default_sql):
+            specified_code, default_code,
+            specified_sql_set, default_sql_set):
         object.__init__(self)
         assert isinstance(column, ColumnAnalysis)
-        assert (specified_code_args is None or
-                isinstance(specified_code_args, list) or
-                isinstance(specified_code_args, tuple))
-        assert (specified_sql_args is None or
-                isinstance(specified_sql_args, list) or
-                isinstance(specified_sql_args, tuple))
-        assert (default_code_args is None or
-                isinstance(default_code_args, list) or
-                isinstance(default_code_args, tuple))
-        assert (default_sql_args is None or
-                isinstance(default_sql_args, list) or
-                isinstance(default_sql_args, tuple))
+        assert (specified_code is None or
+                isinstance(specified_code, LanguageSet))
+        assert (specified_sql_set is None or
+                isinstance(specified_sql_set, SqlSet))
+        assert (default_code is None or
+                isinstance(default_code, LanguageSet))
+        assert (default_sql_set is None or
+                isinstance(default_sql_set, SqlSet))
 
         self.column_name = column.sql_name
         self.is_where_clause = is_where_clause
 
         self.__is_required = is_required
-        
-        def args_to_tuple(args):
-            sca = []
-            if args is not None:
-                for a in args:
-                    if isinstance(a, str):
-                        a = SqlArgument(a, column.schema.value_type, False)
-                    assert isinstance(a, SqlArgument)
-                    sca.append(a)
-            return tuple(sca)
-            
-        self.__specified_code_args = args_to_tuple(specified_code_args)
         self.__specified_code = specified_code
-        self.__default_code_args = args_to_tuple(default_code_args)
         self.__default_code = default_code
-        self.__specified_sql_args = args_to_tuple(specified_sql_args)
-        self.__specified_sql = specified_sql
-        self.__default_sql_args = args_to_tuple(default_sql_args)
-        self.__default_sql = default_sql
+        self.__specified_sql_set = specified_sql_set
+        self.__default_sql_set = default_sql_set
 
         # Validation: the default arguments must be, at most, within the
         # list of specified arguments.  This means that we don't allow for
@@ -225,56 +210,26 @@ class InputValue(object):
         # inputs given to the code, though.
         # FIXME validation of above.
 
-    def get_code_arguments(self, is_specified):
+    def get_code(self, is_specified):
         """
 
-        :return: the list of arguments (SqlArgument) that the program passes to
-            the code_value text.  The code, if given, will generate as output
-            the sql input arguments.
-        """
-        if is_specified:
-            return self.__specified_code_args
-        else:
-            return self.__default_code_args
-
-    def get_sql_arguments(self, is_specified):
-        """
-
-        :return: the list of arguments (SqlArgument) that the program passes
-            into the prepared statement.
-        """
-        if is_specified:
-            return self.__specified_sql_args
-        else:
-            return self.__default_sql_args
-
-    def get_code_value(self, is_specified):
-        """
-
-        :param is_specified: True if the arguments for this input value are
-            passed to the method, or False if a default value must be given.
-        :return: the code that generates the sql value, or None if there is no
-            code, meaning the arguments are added directly into the prepared
-            statement.
+        :return: the LanguageSet.  The code, if given, will generate as output
+            the sql into an output variable.
         """
         if is_specified:
             return self.__specified_code
         else:
             return self.__default_code
 
-    def get_sql_value(self, is_specified):
+    def get_sql(self, is_specified):
         """
 
-        :param is_specified: True if the arguments for this input value are
-            passed to the method, or False if a default value must be given.
-        :return: the sql to use as the value, or None if there is no sql
-            value, meaning that no value or column is added into the
-            sql statement.
+        :return: the SqlSet.
         """
         if is_specified:
-            return self.__specified_sql
+            return self.__specified_sql_set
         else:
-            return self.__default_sql
+            return self.__default_sql_set
 
     @property
     def is_required(self):
@@ -285,91 +240,178 @@ class InputValue(object):
 
 
 class UpdateCreateQuery(object):
-    def __init__(self, analysis_obj, platforms, language, arg_converter):
-        self.arg_converter = arg_converter
+    """
+    A parent class for specifying data to be input into a table.
+    """
+    def __init__(self, analysis_obj):
+        # Columns that are updated by the query
+        self.__columns = self._get_columns_for(analysis_obj)
 
-        columns = self._get_columns_for(analysis_obj)
-
-        # list of all the (code) input arguments required
+        # list of all the (code) input arguments required.  Order is important.
         # list of strings
-        self.required_input_arguments = []
+        self.__required_input_arguments = []
 
-        # list of all the (code) optional input arguments
+        # list of all the (code) optional input arguments.  Order is important.
         # list of strings
-        self.optional_input_arguments = []
+        self.__optional_input_arguments = []
 
-        # List of all the required columns as InputValue instances
+        # List of all the required __columns as InputValue instances.
         # list of InputValue
-        self.required_input_values = []
+        self.__required_input_values = []
 
-        # List of all the optional columns as InputValue instances
+        # List of all the optional __columns as InputValue instances.
         # list of InputValue
-        self.optional_input_values = []
+        self.__optional_input_values = []
 
-        # Mapping of optional InputValue to all the input arguments required.
+        # Mapping of each InputValue to all the input arguments required.
         # Thus, the code can check if each of the arguments was given, then
         # that optional value can be used.  If they aren't all given, then
         # the default value should be used on the input.
         # Map{InputValue => argument list(list of str)}
-        self.value_arguments = {}
+        self.__value_arguments = {}
 
-        # Mapping of all InputValue to their where clause InputValue (list)
-        self.where_values = {}
+        # List of all where values
+        self.__where_values = []
+
+        # Column mapping to the inputs (list of InputValue)
+        self.__column_to_values = {}
 
         # Note: don't use sets.  Order is very important for the arguments.
 
-        for c in columns:
-            assert isinstance(c, ColumnAnalysis)
-            value_set = list(self._create_values(c, platforms, language, False))
+        required = []
+        optional = []
+
+        for col in self.__columns:
+            assert isinstance(col, ColumnAnalysis)
+
+            value_set = list(self._create_values(col, False))
             assert len(value_set) == 1
-            value_set.extend(self._create_values(c, platforms, language, True))
-            optional_args = []
+            value_set.extend(self._create_values(col, True))
+            self.__column_to_values[col] = value_set
             required = False
-            for v in value_set:
-                assert isinstance(v, InputValue)
-                required = required or v.is_required
+            for val in value_set:
+                assert isinstance(val, InputValue)
+                required = required or val.is_required
 
             for value in value_set:
                 assert isinstance(value, InputValue)
                 if required:
-                    for a in value.get_code_arguments(True):
-                        if a not in self.required_input_arguments:
-                            self.required_input_arguments.append(a)
-                    for a in value.get_sql_arguments(True):
-                        if a not in self.required_input_arguments:
-                            self.required_input_arguments.append(a)
+                    self.__required_input_values.append(value)
+                    for arg in value.get_code(True).arguments:
+                        assert isinstance(arg, LanguageArgument)
+                        required.append(arg.name)
+                    for arg in value.get_sql(True).arguments:
+                        assert isinstance(arg, SqlArgument)
+                        required.append(arg.name)
                 else:
-                    for a in value.get_code_arguments(True):
-                        if a not in optional_args:
-                            optional_args.append(a)
-                        if a not in self.optional_input_arguments:
-                            self.optional_input_arguments.append(a)
-                    for a in value.get_sql_arguments(True):
-                        if a not in optional_args:
-                            optional_args.append(a)
-                        if a not in self.optional_input_arguments:
-                            self.optional_input_arguments.append(a)
+                    self.__optional_input_values.append(value)
+                    for arg in value.get_code(True).arguments:
+                        assert isinstance(arg, LanguageArgument)
+                        required.append(arg.name)
+                    for arg in value.get_sql(True).arguments:
+                        assert isinstance(arg, SqlArgument)
+                        required.append(arg.name)
 
-                    for a in value.get_code_arguments(False):
-                        if a not in self.optional_input_arguments:
-                            self.optional_input_arguments.append(a)
-                    for a in value.get_sql_arguments(False):
-                        if a not in self.optional_input_arguments:
-                            self.optional_input_arguments.append(a)
+                    for arg in value.get_code(False).arguments:
+                        assert isinstance(arg, LanguageArgument)
+                        optional.append(arg.name)
+                    for arg in value.get_sql(False).arguments:
+                        assert isinstance(arg, SqlArgument)
+                        optional.append(arg.name)
 
-            self.value_arguments[value_set[0]] = optional_args
-            self.where_values[value_set[0]] = value_set[1:]
+        for name in required:
+            if name not in self.__required_input_arguments:
+                self.__required_input_arguments.append(name)
+        for name in optional:
+            if (name not in self.__required_input_arguments and
+                    name not in self.__optional_input_arguments):
+                self.__optional_input_arguments.append(name)
 
-            if required:
-                self.required_input_values.append(value_set[0])
-            else:
-                self.optional_input_values.append(value_set[0])
+
+        for value_list in [ self.__required_input_values,
+                            self.__optional_input_values ]:
+            for value in value_list:
+                if value.is_where_clause:
+                    self.__where_values.append(value)
+                args = []
+                for arg in value.get_code(True).arguments:
+                    assert isinstance(arg, LanguageArgument)
+                    args.append(arg)
+                for arg in value.get_sql(True).arguments:
+                    assert isinstance(arg, SqlArgument)
+                    args.append(arg)
+                self.__value_arguments[value] = tuple(args)
+
+    @property
+    def columns(self):
+        """
+        All the columns that the user specifies to perform this action.
+        """
+        return self.__columns
+
+    @property
+    def required_input_arguments(self):
+        """
+        :return list(str): the string names of the arguments required by
+            the generated source code.
+        """
+        return self.__required_input_arguments
+
+    @property
+    def optional_input_arguments(self):
+        """
+        :return list(str): the string names of the arguments optionally used by
+            the generated source code.
+        """
+        return self.__optional_input_arguments
+
+    @property
+    def required_input_values(self):
+        """
+        :return list(InputValue):
+        """
+        return self.__required_input_values
+
+    @property
+    def optional_input_values(self):
+        """
+        :return list(InputValue):
+        """
+        return self.__optional_input_values
+
+    @property
+    def value_arguments(self):
+        """
+        :return map(InputValue -> LanguageArgument | SqlArgument): All the
+                arguments for a given value.
+        """
+        return self.__value_arguments
+
+    @property
+    def where_values(self):
+        """
+        All the InputValue instances used in where clauses (list)
+        """
+        return self.__where_values
+
+    @property
+    def column_to_values(self):
+        """
+        :return dict(str, list(InputValue)): column mapping to the inputs
+        """
+        return self.__column_to_values
 
     def _get_columns_for(self, analysis_obj):
-        raise Exception("not implemented")
+        """
+        :return list(ColumnAnalysis):
+        """
+        raise NotImplementedError()
 
-    def _create_values(self, column, platforms, language, is_where_clause):
-        raise Exception("not implemented")
+    def _create_values(self, column, is_where_clause):
+        """
+        :return list(InputValue):
+        """
+        raise NotImplementedError()
 
 
 class UpdateQuery(UpdateCreateQuery):
@@ -380,20 +422,41 @@ class UpdateQuery(UpdateCreateQuery):
     by the user), the optional parameters (may be provided, but doesn't have to,
     and can have a value (code or sql) if the user didn't give it),
     and the constraints.
+
+    The update also defines the primary key columns, which are not added to the
+    list of optional or required values, because these cannot be updated in
+    the table.  Instead, these are used as part of the where clause.
     """
-    def __init__(self, analysis_obj, platforms, language):
-        UpdateCreateQuery.__init__(self, analysis_obj, platforms, language)
-        self.primary_key_columns = []
-        for c in analysis_obj.columns_analysis:
-            assert isinstance(c, ColumnAnalysis)
-            if c.is_primary_key:
-                self.primary_key_columns.append(c)
+    def __init__(self, analysis_obj, platforms, language, arg_converter):
+        UpdateCreateQuery.__init__(self, analysis_obj, platforms, language,
+            arg_converter)
+        self.__primary_key_columns = []
+        self.__primary_key_values = []
+        for col in analysis_obj.columns_analysis:
+            assert isinstance(col, ColumnAnalysis)
+            if col.is_primary_key:
+                self.__primary_key_columns.append(col)
+                if col in self.column_to_values:
+                    self.where_values.extend(self.column_to_values[col])
+                else:
+                    val = InputValue.create_direct_value(col, True, True)
+                    self.__primary_key_values.append(val)
+
+        # TODO If there is just one optional input value, it should be requried
+
+    @property
+    def primary_key_columns(self):
+        return self.__primary_key_columns
+
+    @property
+    def primary_key_values(self):
+        return self.__primary_key_values
 
     def _get_columns_for(self, analysis_obj):
         assert isinstance(analysis_obj, ColumnSetAnalysis)
         return analysis_obj.columns_for_update
 
-    def _create_values(self, column, platforms, language, is_where_clause):
+    def _create_values(self, column, is_where_clause):
         assert isinstance(column, ColumnAnalysis)
         is_required = column.update_required or column.is_primary_key
 
@@ -401,7 +464,7 @@ class UpdateQuery(UpdateCreateQuery):
             values = column.update_restrictions
         else:
             # Can be None
-            values = [column.update_value]
+            values = [ column.update_value ]
             if values[0].arguments is None or len(values[0].arguments) <= 0:
                 is_required = True
 
@@ -409,23 +472,12 @@ class UpdateQuery(UpdateCreateQuery):
         for v in values:
             if v is None:
                 # Add the value directly
-                ret.append(InputValue.create_specified(column, is_required,
-                           is_where_clause, None, [],
-                           # FIXME this is specific to PHP prepared statements
-                           ':' + column.sql_name, [column.sql_name]))
+                ret.append(InputValue.create_direct_value(column, is_required,
+                           is_where_clause))
             else:
                 assert isinstance(v, AbstractProcessedConstraint)
-                # Updates currently have either required values or default
-                # values, not both.
-
-                if is_required:
-                    ret.append(InputValue.create_specified_constraint(
-                        column, True, is_where_clause, v.constraint, platforms,
-                        language))
-                else:
-                    ret.append(InputValue.create_default_constraint(
-                        column, False, is_where_clause, v.constraint, platforms,
-                        language))
+                ret.append(InputValue.create_specified_constraint(
+                    column, is_required, is_where_clause, v.constraint))
         return ret
 
 
@@ -439,27 +491,29 @@ class CreateQuery(UpdateCreateQuery):
     and the constraints.
     """
 
+    # FIXME this all needs to be fixed
+
     def __init__(self, analysis_obj, platforms, language, arg_converter):
         UpdateCreateQuery.__init__(self, analysis_obj, platforms, language,
                                    arg_converter)
         assert isinstance(analysis_obj, ColumnSetAnalysis)
 
-        # names of columns that the database creates.
+        # names of __columns that the database creates.
         # There can be only one of these.
         self.generated_column_name = None
 
-        for c in analysis_obj.columns_analysis:
-            assert isinstance(c, ColumnAnalysis)
-            if c.auto_gen:
+        for col in analysis_obj.columns_analysis:
+            assert isinstance(col, ColumnAnalysis)
+            if col.auto_gen:
                 if self.generated_column_name is not None:
                     raise Exception("multiple auto-generated column values")
-                self.generated_column_name = c.sql_name
+                self.generated_column_name = col.sql_name
 
     def _get_columns_for(self, analysis_obj):
         assert isinstance(analysis_obj, ColumnSetAnalysis)
         return analysis_obj.columns_for_create
 
-    def _create_values(self, column, platforms, language, is_where_clause):
+    def _create_values(self, column, is_where_clause):
         assert isinstance(column, ColumnAnalysis)
         is_required = True
 
@@ -475,19 +529,14 @@ class CreateQuery(UpdateCreateQuery):
             # required, but does not have any user arguments.
 
         ret = []
-        for v in values:
-            # Create values are ALWAYS required.
-
-            if v is None:
+        for val in values:
+            if val is None:
                 # Add the value directly
-                # FIXME this is specific to PHP prepared statements
-                ret.append(InputValue.create_specified(
-                    column, is_required, is_where_clause, None, [],
-                    ':' + column.sql_name, [column.sql_name]))
+                ret.append(InputValue.create_direct_value(column, is_required,
+                           is_where_clause))
             else:
-                assert isinstance(v, AbstractProcessedConstraint)
+                assert isinstance(val, AbstractProcessedConstraint)
 
                 ret.append(InputValue.create_specified_constraint(
-                    column, True, is_where_clause, v.constraint, platforms,
-                    language, self.arg_converter))
+                    column, is_required, is_where_clause, val.constraint))
         return ret

@@ -35,19 +35,19 @@ class Order(object):
 
     def __lt__(self, other):
         assert isinstance(other, Order)
-        return self - other < 0
+        return self -other < 0
 
     def __le__(self, other):
         assert isinstance(other, Order)
-        return self - other <= 0
+        return self -other <= 0
 
     def __gt__(self, other):
         assert isinstance(other, Order)
-        return self - other > 0
+        return self -other > 0
 
     def __ge__(self, other):
         assert isinstance(other, Order)
-        return self - other >= 0
+        return self -other >= 0
 
 
 class BaseObject(object):
@@ -137,26 +137,33 @@ class SqlString(object):
 
 
 class SqlArgument(object):
+    """
+    An argument passed to the SQL code.
+    """
     def __init__(self, name, basic_type, is_collection = False):
         object.__init__(self)
         self.__name = name
         self.__basic_type = basic_type
         self.__is_collection = is_collection
-        
+
     @property
     def name(self):
         return self.__name
-    
+
     @property
     def basic_type(self):
         return self.__basic_type
-    
+
     @property
     def is_collection(self):
         return self.__is_collection
 
 
 class SqlSet(object):
+    """
+    A collection of the SQL snippets for the different platforms, along with
+    the parameterized arguments.
+    """
     def __init__(self, sql_set, arguments):
         assert ((isinstance(sql_set, tuple) or isinstance(sql_set, list))
                 and len(sql_set) > 0)
@@ -180,14 +187,14 @@ class SqlSet(object):
         :return: SqlString if match, or None if no match.
         """
         if isinstance(platforms, str):
-            platforms = [platforms]
+            platforms = [ platforms ]
 
-        for p in platforms:
-            p = p.strip().lower()
+        for plat in platforms:
+            plat = plat.strip().lower()
             for sql in self.__sql_set:
                 assert isinstance(sql, SqlString)
-                for sp in sql.platforms:
-                    if p == sp:
+                for spl in sql.platforms:
+                    if plat == spl:
                         return sql
         for sql in self.__sql_set:
             assert isinstance(sql, SqlString)
@@ -195,38 +202,99 @@ class SqlSet(object):
                     'all' in sql.platforms):
                 return sql
         return None
-    
+
     @property
     def arguments(self):
         return self.__arguments
-    
+
     @property
     def collection_arguments(self):
         ret = []
-        for a in self.arguments:
-            if a.is_collection:
-                ret.append(a)
+        for arg in self.arguments:
+            if arg.is_collection:
+                ret.append(arg)
         return ret
 
-    def sql_args(self, platforms, arg_converter):
-        """
-        Return the sql for the given platforms, with the argument values
-        replaced, using the function "arg_converter", which takes the argument
-        name as input, and outputs the prepared statement replacement string.
-        
-        The outer caller will need to know how to deal with collection
-        arguments, and how those relate to the `arg_converter`.
-
-        :param arg_converter:
-        :return str:
-        """
-        ret = self.get_for_platform(platforms)
-        if ret is None:
-            return None
-        ret = ret.sql
-        for a in self.arguments:
-            ret = ret.replace('{' + a.name + '}', arg_converter(a))
+    @property
+    def simple_arguments(self):
+        ret = []
+        for arg in self.arguments:
+            if not arg.is_collection:
+                ret.append(arg)
         return ret
+
+
+class LanguageArgument(object):
+    """
+    """
+    def __init__(self, name, generic_type):
+        assert isinstance(name, str)
+        assert isinstance(generic_type, str)
+
+        object.__init__(self)
+
+        self.__name = name
+        self.__generic_type = generic_type
+
+    @property
+    def name(self):
+        return self.__name
+
+    @property
+    def generic_type(self):
+        return self.__generic_type
+
+
+class LanguageSet(object):
+    """
+    A collection of the different languages supported for code generation,
+    and the arguments they require.
+    """
+    def __init__(self, language_dict, arguments):
+        """
+        :param language_dict: map between language name and the code.
+        :param arguments: list of strings with the argument names the code uses.
+        """
+        assert isinstance(language_dict, dict) and len(language_dict) > 0
+        langs = {}
+        for name, code in language_dict.items():
+            assert isinstance(name, str)
+            assert isinstance(code, str)
+            name = name.strip().lower()
+            assert name not  in langs
+            langs[name] = code
+
+        if arguments is None:
+            arguments = []
+        assert isinstance(arguments, list) or isinstance(arguments, tuple)
+        for arg in arguments:
+            assert isinstance(arg, LanguageArgument)
+        self.__languages = langs
+        self.__arguments = tuple(arguments)
+
+    def get_for_language(self, language):
+        """
+        Returns the most appropriate code.  The code should have a SQL value
+        (or some other variable) that it sends its code to.
+
+        :param language: str
+        :return: string if match, or None if no match.
+        """
+        assert isinstance(language, str)
+
+        language = language.strip().lower()
+        if language in self.__languages:
+            code = self.__languages[language]
+            return code
+        return None
+
+    @property
+    def arguments(self):
+        """
+        :return a tuple of LanguageArgument
+        """
+        return self.__arguments
+
 
 
 COLUMN_TYPE = SchemaObjectType('column')

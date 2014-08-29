@@ -13,7 +13,9 @@ extension (.json, .xml, .yaml) are read as a schema file.
 """
 
 from . import PARSERS_BY_EXTENSION
-from ..model import (SchemaVersion, SchemaObject, Change)
+from ..model.version import (SchemaVersion)
+from ..model.change import (Change)
+from ..model.schema import (SchemaObject)
 import os.path
 
 

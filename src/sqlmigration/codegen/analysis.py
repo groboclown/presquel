@@ -91,7 +91,7 @@ class AnalysisModel(object):
         pkg = self.get_schema_package(schema)
 
         cols = []
-        for column in schema.columns:
+        for column in schema.__columns:
             cols.append(
                 self._process_column(column, pkg, is_read_only))
 
@@ -231,7 +231,7 @@ class ColumnSetAnalysis(SchemaAnalysis):
     def get_selectable_column_lists(self):
         """
 
-        :return: a list of list of columns that can be used to query the
+        :return: a list of list of __columns that can be used to query the
             schema.  The column information will be the Column schema object.
             These Column schema objects will only be from this table object,
             never from the joined tables.  That behavior must instead be done
@@ -351,7 +351,7 @@ class ColumnSetAnalysis(SchemaAnalysis):
     def columns_for_create(self):
         """
 
-        :return: the columns which are involved in the creation of the rows.
+        :return: the __columns which are involved in the creation of the rows.
             The objects are instances of ColumnAnalysis
         """
         if self.is_read_only:
@@ -368,7 +368,7 @@ class ColumnSetAnalysis(SchemaAnalysis):
     def columns_for_update(self):
         """
 
-        :return: the columns which are involved in updating rows
+        :return: the __columns which are involved in updating rows
         """
         if self.is_read_only:
             return []
@@ -509,7 +509,7 @@ class TopAnalysis(SchemaAnalysis):
     An analysis of the constraints around a top-level object.
 
     @column_index_sets - a list of lists of column names (string).  Each
-        entry in this list represents the columns that can be selected
+        entry in this list represents the __columns that can be selected
         together as a group.
     """
 
@@ -573,7 +573,7 @@ class ProcessedForeignKeyConstraint(AbstractProcessedConstraint):
     def __init__(self, column, package, constraint):
         AbstractProcessedConstraint.__init__(self, column, package, constraint)
 
-        if 'columns' in constraint.details:
+        if '__columns' in constraint.details:
             raise Exception(column.name +
                             ": we do not handle multiple column foreign keys")
         self.is_owner = False

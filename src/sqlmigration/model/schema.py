@@ -4,7 +4,7 @@ Describes the current schema for the database version.
 
 from .base import (BaseObject, TABLE_TYPE, COLUMN_TYPE, VIEW_TYPE,
                    CONSTRAINT_TYPE, SEQUENCE_TYPE, PROCEDURE_TYPE,
-                   SqlSet)
+                   SqlSet, LanguageSet)
 
 
 class SchemaObject(BaseObject):
@@ -86,6 +86,18 @@ class ValueTypeValue(object):
         """
         return self.__computed_value
 
+    @property
+    def requires_argument(self):
+        """
+        Will return False unless this has a non-None computed_value, and that
+        computed value requires the code to provide an argument.
+
+        :return: bool True if this value requires an argument to be given by
+            code, False if the value is self-contained.
+        """
+        return (self.__computed_value is not None and
+            len(self.__computed_value.arguments) > 0)
+
 
 class Constraint(SchemaObject):
     def __init__(self, order, comment, constraint_type, column_names, details,
@@ -120,14 +132,14 @@ class Constraint(SchemaObject):
     def get_columns_by_names(self, parent_schema):
         """
 
-        :return: list of columns in the parent_schema that match the
+        :return: list of __columns in the parent_schema that match the
             column_names.  The column_names order will be maintained.
         """
         assert (isinstance(parent_schema, Table) or
                 isinstance(parent_schema, View))
         ret = []
         for cn in self.column_names:
-            for col in parent_schema.columns:
+            for col in parent_schema.__columns:
                 if col.name == cn:
                     ret.append(col)
         return ret
@@ -143,53 +155,29 @@ class SqlConstraint(Constraint):
 
     @property
     def sql(self):
+        """
+        :return SqlSet:
+        """
         return self.__sql_set
-
-    def sql_args(self, platforms, arg_converter):
-        """
-        Return the sql for the given platforms, with the argument values
-        replaced, using the function "arg_converter", which takes the argument
-        name as input, and outputs the prepared statement replacement string.
-
-        :param arg_converter:
-        :return:
-        """
-        return self.sql.sql_args(platforms, arg_converter)
-
-    @property
-    def arguments(self):
-        return self.sql.arguments
 
 
 class LanguageConstraint(Constraint):
+    """
+    A constraint that is defined as software, rather than direct SQL.
+    """
     def __init__(self, order, comment, constraint_type, column_names, details,
-                 language, code, arguments, changes):
+                 code, changes):
         Constraint.__init__(self, order, comment, constraint_type, column_names,
                             details, changes)
-        assert isinstance(language, str)
-        assert isinstance(code, str)
-        self.__language = language
+        assert isinstance(code, LanguageSet)
         self.__code = code
-        self.__arguments = arguments or []
-
-    @property
-    def language(self):
-        return self.__language
 
     @property
     def code(self):
+        """
+        :return LanguageSet:
+        """
         return self.__code
-
-    @property
-    def arguments(self):
-        return self.__arguments
-
-    def code_for_language(self, language):
-        # FIXME eventually, this should allow sub-languages under it.
-        if language != self.language:
-            raise Exception("unsupported langauge " + language +
-                            " for constraint")
-        return self.code
 
 
 class NamedConstraint(Constraint):
@@ -285,15 +273,15 @@ class WhereClause(object):
         assert isinstance(sqlset, SqlSet)
         self.__name = name
         self.__sqlset = sqlset
-    
+
     @property
     def name(self):
         return self.__name
-    
+
     @property
     def sql(self):
         return self.__sqlset
-    
+
     @property
     def arguments(self):
         return self.sql.arguments
@@ -313,7 +301,7 @@ class WhereClause(object):
 class ExtendedSql(object):
     """
     Defines extra Sql statements that should be added to the generated code.
-    
+
     TODO these should add possible column definitions for QUERY types.
     """
     def __init__(self, name, sql_type, sqlset, post_sqlset):
@@ -326,7 +314,7 @@ class ExtendedSql(object):
         assert isinstance(name, str)
         assert isinstance(sql_type, str)
         assert isinstance(sqlset, SqlSet)
-        
+
         # FIXME this is parsing that should be done elsewhere
         sql_type = sql_type.strip().lower()
         if sql_type == 'wrapper':
@@ -335,32 +323,32 @@ class ExtendedSql(object):
         else:
             assert post_sqlset is None
             self.__is_wrapper = False
-        
+
         self.__name = name
         self.__sql_type = sql_type
         self.__sqlset = sqlset
         self.__post_sqlset = post_sqlset
-    
+
     @property
     def name(self):
         return self.__name
-    
+
     @property
     def sql_type(self):
         return self.__sql_type
-    
+
     @property
     def is_wrapper(self):
         return self.__is_wrapper
-    
+
     @property
     def sql(self):
         """
         In the case of the "wrapper" sql_type, this is the pre-execution
-        sql.  In all other cases, this is the actual sql to run. 
+        sql.  In all other cases, this is the actual sql to run.
         """
         return self.__sqlset
-    
+
     @property
     def post_sql(self):
         """
@@ -368,7 +356,7 @@ class ExtendedSql(object):
         and None in all other cases.
         """
         return self.__post_sqlset
-    
+
     @property
     def arguments(self):
         return self.__sqlset.arguments
@@ -383,19 +371,19 @@ class ExtendedSql(object):
         :return:
         """
         return self.sql.sql_args(platforms, arg_converter)
-    
+
     def post_sql_args(self, platforms, arg_converter):
         """
-        
+
         """
         assert self.is_wrapper
         return self.post_sql.sql_args(platforms, arg_converter)
-    
+
 
 
 class ColumnarSchemaObject(SchemaObject):
     """
-    A schema type that has columns.  This includes tables, views, and stored
+    A schema type that has __columns.  This includes tables, views, and stored
     procedures that return tables.
     """
     def __init__(self, order, comment, catalog_name, schema_name, name,
@@ -419,20 +407,20 @@ class ColumnarSchemaObject(SchemaObject):
         return self.__schema_name
 
     @property
-    def columns(self):
+    def __columns(self):
         return self.__columns
 
     @property
     def constraints(self):
         return self.__top_constraints
-    
+
     @property
     def where_clauses(self):
         """
         :return list(WhereClause):
         """
         return self.__where_clauses
-    
+
     @property
     def extended_sql(self):
         """
@@ -442,7 +430,7 @@ class ColumnarSchemaObject(SchemaObject):
 
     @property
     def sub_schema(self):
-        ret = list(self.columns)
+        ret = list(self.__columns)
         ret.extend(self.constraints)
         return ret
 
@@ -456,7 +444,7 @@ class Table(ColumnarSchemaObject):
                                       schema_name, table_name, columns,
                                       table_constraints, TABLE_TYPE, changes,
                                       where_clauses, extended_sql)
-        
+
         self.__table_name = table_name
         self.__table_space = table_space
 
@@ -478,7 +466,7 @@ class View(ColumnarSchemaObject):
                                       table_constraints, VIEW_TYPE, changes,
                                       where_clauses,
                                       extended_sql)
-        
+
         assert isinstance(select_query, SqlSet)
         self.__replace_if_exists = replace_if_exists
         self.__view_name = view_name
