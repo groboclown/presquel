@@ -1,7 +1,9 @@
 # !/usr/bin/python3
 
-from ..model import (Column, Table, View, SchemaVersion, SchemaObject,
-                     Constraint, SqlConstraint, SqlArgument)
+from ..model.version import (SchemaVersion)
+from ..model.base import (SqlArgument)
+from ..model.schema import (SchemaObject, Column, Table, View, Constraint,
+                            SqlConstraint)
 
 
 class AnalysisModel(object):
@@ -91,7 +93,7 @@ class AnalysisModel(object):
         pkg = self.get_schema_package(schema)
 
         cols = []
-        for column in schema.__columns:
+        for column in schema.columns:
             cols.append(
                 self._process_column(column, pkg, is_read_only))
 
@@ -468,7 +470,7 @@ class ColumnAnalysis(SchemaAnalysis):
 
         for c in self.__constraints_analysis:
             c.update_references(analysis_model)
-    
+
     @property
     def name_as_sql_argument(self):
         return SqlArgument(self.sql_name, self.schema.value_type, False)
@@ -524,7 +526,7 @@ class TopAnalysis(SchemaAnalysis):
         self.primary_key_constraint = None
 
         self.column_index_sets = []
-        
+
         self.unique_or_primary_sets = []
 
         for c in constraints_analysis:
@@ -548,11 +550,11 @@ class TopAnalysis(SchemaAnalysis):
                 self.read_validations.append(c)
             elif c.constraint.constraint_type in ['validatewrite', 'validate']:
                 self.write_validations.append(c)
-        
+
 
 
 class AbstractProcessedConstraint(SchemaAnalysis):
-    def __init__(self, column, package, constraint, name=None):
+    def __init__(self, column, package, constraint, name = None):
         SchemaAnalysis.__init__(self, constraint, package)
 
         self.column = column

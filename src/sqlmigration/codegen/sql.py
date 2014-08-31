@@ -40,14 +40,14 @@ class ReadQueryData(object):
                 if value is not None:
                     handled = True
                     col_names.append(column.sql_name)
-                    for arg in constraint.arguments:
+                    for arg in sql_set.arguments:
                         # FIXME this is mysql specific syntax.
                         # FIXME this should instead use the SqlConstraint
                         # method to get the replaced string.
                         value = value.replace('{' + arg + '}', ':' + arg)
                     # FIXME is this the correct thing to do?
                     col_query.append(value + ' AS ' + column.sql_name)
-                    arguments.extend(constraint.arguments)
+                    arguments.extend(sql_set.arguments)
 
             if not handled:
                 col_query.append(analysis_obj.sql_name + '.' + column.sql_name +
@@ -68,8 +68,6 @@ class ReadQueryData(object):
                         value = value.replace('{' + arg + '}', ':' + arg)
                         arguments.append(arg)
                     where_ands.append(value)
-
-        # TODO add optional where clauses.  These will be in the top analysis
 
         fki = 0
         for fkey in analysis_obj.foreign_keys_analysis:
@@ -94,7 +92,7 @@ class ReadQueryData(object):
                     rtab = fkey.remote_table
                     assert (isinstance(rtab, Table) or
                             isinstance(rtab, View))
-                    for fcol in rtab.__columns:
+                    for fcol in rtab.columns:
                         assert isinstance(fcol, Column)
                         query_name = fkey.fk_table_name + '__' + fcol.name
                         col_names.append(query_name)
@@ -138,9 +136,9 @@ class InputValue(object):
     def create_direct_value(column, is_required, is_where_clause):
         sql_str = "{" + column.sql_name + "}"
         if is_where_clause:
-           sql_str = column.sql_name + " = " + sql_str
+            sql_str = column.sql_name + " = " + sql_str
         sstr = SqlString(sql_str, "universal", [ "any" ])
-        sql = SqlSet(sstr, column.name_as_sql_argument)
+        sql = SqlSet([ sstr ], [ column.name_as_sql_argument ])
         return InputValue(column, is_required, is_where_clause,
             None, None, sql, None)
 
@@ -195,6 +193,7 @@ class InputValue(object):
                 isinstance(default_sql_set, SqlSet))
 
         self.column_name = column.sql_name
+        self.column = column
         self.is_where_clause = is_where_clause
 
         self.__is_required = is_required
@@ -244,6 +243,11 @@ class UpdateCreateQuery(object):
     A parent class for specifying data to be input into a table.
     """
     def __init__(self, analysis_obj):
+        """
+        :param analyis_obj ColumnSetAnalysis:
+        """
+        assert isinstance(analysis_obj, ColumnSetAnalysis)
+
         # Columns that are updated by the query
         self.__columns = self._get_columns_for(analysis_obj)
 
@@ -255,11 +259,11 @@ class UpdateCreateQuery(object):
         # list of strings
         self.__optional_input_arguments = []
 
-        # List of all the required __columns as InputValue instances.
+        # List of all the required columns as InputValue instances.
         # list of InputValue
         self.__required_input_values = []
 
-        # List of all the optional __columns as InputValue instances.
+        # List of all the optional columns as InputValue instances.
         # list of InputValue
         self.__optional_input_values = []
 
@@ -281,43 +285,33 @@ class UpdateCreateQuery(object):
         required = []
         optional = []
 
-        for col in self.__columns:
+        for col in self.columns:
             assert isinstance(col, ColumnAnalysis)
 
             value_set = list(self._create_values(col, False))
             assert len(value_set) == 1
             value_set.extend(self._create_values(col, True))
             self.__column_to_values[col] = value_set
-            required = False
+            is_required = False
             for val in value_set:
                 assert isinstance(val, InputValue)
-                required = required or val.is_required
+                is_required = is_required or val.is_required
 
             for value in value_set:
                 assert isinstance(value, InputValue)
-                if required:
+                out_list = required
+                arg_list_list = [ value.get_code(True), value.get_sql(True) ]
+                if is_required:
                     self.__required_input_values.append(value)
-                    for arg in value.get_code(True).arguments:
-                        assert isinstance(arg, LanguageArgument)
-                        required.append(arg.name)
-                    for arg in value.get_sql(True).arguments:
-                        assert isinstance(arg, SqlArgument)
-                        required.append(arg.name)
                 else:
                     self.__optional_input_values.append(value)
-                    for arg in value.get_code(True).arguments:
-                        assert isinstance(arg, LanguageArgument)
-                        required.append(arg.name)
-                    for arg in value.get_sql(True).arguments:
-                        assert isinstance(arg, SqlArgument)
-                        required.append(arg.name)
-
-                    for arg in value.get_code(False).arguments:
-                        assert isinstance(arg, LanguageArgument)
-                        optional.append(arg.name)
-                    for arg in value.get_sql(False).arguments:
-                        assert isinstance(arg, SqlArgument)
-                        optional.append(arg.name)
+                    out_list = optional
+                    arg_list_list.extend([ value.get_code(False),
+                                          value.get_sql(False) ])
+                for arg_list in arg_list_list:
+                    if arg_list is not None:
+                        for arg in arg_list.arguments:
+                            out_list.append(arg.name)
 
         for name in required:
             if name not in self.__required_input_arguments:
@@ -334,12 +328,16 @@ class UpdateCreateQuery(object):
                 if value.is_where_clause:
                     self.__where_values.append(value)
                 args = []
-                for arg in value.get_code(True).arguments:
-                    assert isinstance(arg, LanguageArgument)
-                    args.append(arg)
-                for arg in value.get_sql(True).arguments:
-                    assert isinstance(arg, SqlArgument)
-                    args.append(arg)
+                code = value.get_code(True)
+                if code is not None:
+                    for arg in code.arguments:
+                        assert isinstance(arg, LanguageArgument)
+                        args.append(arg)
+                sql = value.get_sql(True)
+                if sql is not None:
+                    for arg in sql.arguments:
+                        assert isinstance(arg, SqlArgument)
+                        args.append(arg)
                 self.__value_arguments[value] = tuple(args)
 
     @property
@@ -391,13 +389,15 @@ class UpdateCreateQuery(object):
     def where_values(self):
         """
         All the InputValue instances used in where clauses (list)
+        :return list(InputValue):
         """
         return self.__where_values
 
     @property
     def column_to_values(self):
         """
-        :return dict(str, list(InputValue)): column mapping to the inputs
+        :return dict(ColumnAnalysis, list(InputValue)): column mapping to the
+            inputs
         """
         return self.__column_to_values
 
@@ -427,9 +427,8 @@ class UpdateQuery(UpdateCreateQuery):
     list of optional or required values, because these cannot be updated in
     the table.  Instead, these are used as part of the where clause.
     """
-    def __init__(self, analysis_obj, platforms, language, arg_converter):
-        UpdateCreateQuery.__init__(self, analysis_obj, platforms, language,
-            arg_converter)
+    def __init__(self, analysis_obj):
+        UpdateCreateQuery.__init__(self, analysis_obj)
         self.__primary_key_columns = []
         self.__primary_key_values = []
         for col in analysis_obj.columns_analysis:
@@ -438,23 +437,36 @@ class UpdateQuery(UpdateCreateQuery):
                 self.__primary_key_columns.append(col)
                 if col in self.column_to_values:
                     self.where_values.extend(self.column_to_values[col])
+                    self.__primary_key_values.extend(self.column_to_values[col])
                 else:
                     val = InputValue.create_direct_value(col, True, True)
                     self.__primary_key_values.append(val)
+                    self.where_values.append(val)
 
         # TODO If there is just one optional input value, it should be requried
 
     @property
     def primary_key_columns(self):
+        """
+        :return list(ColumnAnalysis): primary key columns
+        """
         return self.__primary_key_columns
 
     @property
     def primary_key_values(self):
+        """
+        :return list(InputValue):
+        """
         return self.__primary_key_values
 
     def _get_columns_for(self, analysis_obj):
         assert isinstance(analysis_obj, ColumnSetAnalysis)
-        return analysis_obj.columns_for_update
+        ret = []
+        for col in analysis_obj.columns_for_update:
+            assert isinstance(col, ColumnAnalysis)
+            if not col.is_primary_key:
+                ret.append(col)
+        return ret
 
     def _create_values(self, column, is_where_clause):
         assert isinstance(column, ColumnAnalysis)
@@ -465,19 +477,20 @@ class UpdateQuery(UpdateCreateQuery):
         else:
             # Can be None
             values = [ column.update_value ]
-            if values[0].arguments is None or len(values[0].arguments) <= 0:
+            if (values[0] is not None and (values[0].arguments is None or
+                    len(values[0].arguments) <= 0)):
                 is_required = True
 
         ret = []
-        for v in values:
-            if v is None:
+        for val in values:
+            if val is None:
                 # Add the value directly
                 ret.append(InputValue.create_direct_value(column, is_required,
                            is_where_clause))
             else:
-                assert isinstance(v, AbstractProcessedConstraint)
+                assert isinstance(val, AbstractProcessedConstraint)
                 ret.append(InputValue.create_specified_constraint(
-                    column, is_required, is_where_clause, v.constraint))
+                    column, is_required, is_where_clause, val.constraint))
         return ret
 
 
@@ -490,15 +503,11 @@ class CreateQuery(UpdateCreateQuery):
     and can have a value (code or sql) if the user didn't give it),
     and the constraints.
     """
-
-    # FIXME this all needs to be fixed
-
-    def __init__(self, analysis_obj, platforms, language, arg_converter):
-        UpdateCreateQuery.__init__(self, analysis_obj, platforms, language,
-                                   arg_converter)
+    def __init__(self, analysis_obj):
+        UpdateCreateQuery.__init__(self, analysis_obj)
         assert isinstance(analysis_obj, ColumnSetAnalysis)
 
-        # names of __columns that the database creates.
+        # names of columns that the database creates.
         # There can be only one of these.
         self.generated_column_name = None
 
@@ -521,7 +530,7 @@ class CreateQuery(UpdateCreateQuery):
             values = column.create_restrictions
         else:
             # Can be None
-            values = [column.create_value]
+            values = [ column.create_value ]
             # Default values are value types, which are specified in the dbs.
             if column.default_value is not None:
                 is_required = False

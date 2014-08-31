@@ -2,11 +2,8 @@
 Handles the conversion of SQL into code or straight up SQL.
 """
 
-from ..model.base import (SqlArgument, SqlSet, LanguageSet)
+from ..model.base import (SqlArgument, SqlSet, LanguageSet, SqlString)
 from ..model.schema import (SqlConstraint, LanguageConstraint)
-from .sql import (InputValue)
-
-
 
 
 class PrepSqlConverter(object):
@@ -71,7 +68,11 @@ class PrepSqlConverter(object):
             return ''
         if isinstance(arg, LanguageSet):
             return ''
-        assert False, "Incorrect type for arg"
+        if isinstance(arg, SqlArgument):
+            if arg.is_collection:
+                return ''
+            return self._generate_sql_parameter(arg.name)
+        assert False, "Incorrect type for arg: " + str(type(arg))
 
     def _generate_code_for_lang_set(self, output_variable, lang):
         assert isinstance(LanguageSet, lang)
@@ -81,27 +82,65 @@ class PrepSqlConverter(object):
 
     def _generate_code_for_sql_set(self, output_variable, sql_set):
         """
-        Generates source code for a SqlSet.  Standard implementations should
-        take the output_variable as the pending sql string variable, and
-        replace the collection variables.
+        Generates source code for a SqlSet.  If the SqlSet does not contain
+        anything that will generate code, then this MUST return None.
+
+        Default implementation will return None if there is no collection
+        argument.
         """
-        # for arg in sql_set.collection_arguments:
-        #    assert isinstance(arg, SqlArgument)
-        #    assert arg.is_collection is True
-        #    sql = self.
-        raise NotImplementedError()
+        assert isinstance(sql_set, SqlSet)
+        sql = sql_set.get_for_platform(self.platforms)
+
+        # Split the sql into bits for insertion
+        sql_bits = [ [ 0, sql ] ]
+
+        has_collections = False
+
+        for arg in sql_set.arguments:
+            assert isinstance(arg, SqlArgument)
+            new_bits = []
+            for stype, bit in sql_bits:
+                if stype == 0:
+                    match = '{' + arg.name + '}'
+                    while bit.count(match) > 0:
+                        pos = bit.index(match)
+
+                        if arg.is_collection:
+                            has_collections = True
+                            new_bits.append([0, bit[0: pos]])
+                            new_bits.append([1, arg])
+                            bit = bit[pos + len(match):]
+                        else:
+                            bit = (bit[0:pos] +
+                                self._generate_sql_parameter(arg.name) +
+                                bit[pos + len(match):])
+                    if len(bit) > 0:
+                        new_bits.append([0, bit])
+                else:
+                    new_bits.append([stype, bit])
+            sql_bits = new_bits
+
+        if not has_collections:
+            return None
+
+        return self._generate_code_for_collection_arguments(output_variable,
+            sql_set, sql_bits)
+
 
     def _generate_sql_for_sql_set(self, sql_set):
         """
         Generates the SQL for a SqlSet
         """
         assert isinstance(sql_set, SqlSet)
-        sql = sql_set.get_for_platform(self.platforms)
-        if sql is None:
+        sql_str = sql_set.get_for_platform(self.platforms)
+        if sql_str is None:
             raise Exception("platform not supported: " + str(self.platforms))
+        assert isinstance(sql_str, SqlString)
+        sql = sql_str.sql
         for arg in sql_set.simple_arguments:
             assert isinstance(arg, SqlArgument)
-            assert arg.is_collection is False
+            if arg.is_collection:
+                return None
             sql = sql.replace('{' + arg.name + '}',
                 self._generate_sql_parameter(arg.name))
 
@@ -115,3 +154,15 @@ class PrepSqlConverter(object):
         """
         assert isinstance(arg_name, str)
         return ':' + arg_name
+
+    def _generate_code_for_collection_arguments(self, output_variable,
+            sql_set, sql_bits):
+        """
+        Create the code for the collection arguments.  The "sql_bits" is
+        a list of tuples (type id, argument).  The type id is 0 for a
+        string argument (straight up SQL text), and 1 for a collection
+        SqlArgument.
+
+        :return list(str):
+        """
+        raise NotImplementedError()

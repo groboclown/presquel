@@ -6,7 +6,7 @@ from ..model.base import (SCHEMA_OBJECT_TYPES,
 from ..model.schema import (Table, View,
                      Column, SqlConstraint, LanguageConstraint, Constraint,
                      NamedConstraint, WhereClause, ExtendedSql,
-                     ValueTypeValue, SqlSet)
+                     ValueTypeValue, SqlSet, LanguageSet)
 
 
 class BaseObjectBuilder(object):
@@ -726,9 +726,10 @@ class SchemaParser(object):
         if language is not None and code is not None:
             if name is not None:
                 details['name'] = name
+            code_set = LanguageSet({language: code}, arguments)
             return LanguageConstraint(cons_obj.order, cons_obj.comment,
                                       constraint_type, column_names, details,
-                                      language, code, arguments, changes)
+                                      code_set, changes)
 
         if name is not None:
             return NamedConstraint(cons_obj.order, cons_obj.comment,

@@ -3,18 +3,25 @@
 Tools to help in the generation of PHP source files.
 """
 
+# FIXME because of collection arguments, each SQL argument needs to be
+# in BOTH the generate_code and generate_sql.  Note that only one will
+# end up being used.
+
+
+
+
 from .filegen import (LanguageGenerator, GenConfig)
 from .converter import (PrepSqlConverter)
 from .analysis import (ColumnAnalysis)
-from .sql import (ReadQueryData, UpdateQuery, InputValue)
-from ..model.schema import (WhereClause, ExtendedSql)
+from .sql import (ReadQueryData, CreateQuery, UpdateQuery, InputValue)
+from ..model.schema import (WhereClause, ExtendedSql, SqlConstraint)
 from ..model.base import (SqlArgument, SqlSet, LanguageSet)
 import time
 
 def escape_php_string(php_str):
     """
 
-    :param s: the text, as a string
+    :parameter php_str: the text, as a string
     :return: escaped text, ready for insertion into a PHP string.
     """
 
@@ -140,6 +147,9 @@ class PhpLanguageGenerator(LanguageGenerator):
 
             for whc in config.analysis_obj.schema.where_clauses:
                 assert isinstance(whc, WhereClause)
+                sql = whc.sql
+                assert isinstance(sql, SqlSet)
+
                 ret.extend([
                     '', '',
                     '/**',
@@ -151,13 +161,13 @@ class PhpLanguageGenerator(LanguageGenerator):
                     ''
                 ])
 
-                if len(whc.arguments) > 0:
-                    for arg in whc.arguments:
+                if len(sql.arguments) > 0:
+                    for arg in sql.arguments:
                         ret.append('    public $' + arg.name + ';')
                     ret.append('    function __construct(' +
-                        (', '.join(('$' + arg.name) for arg in whc.arguments)) +
+                        (', '.join(('$' + arg.name) for arg in sql.arguments)) +
                         ') {')
-                    for arg in whc.arguments:
+                    for arg in sql.arguments:
                         ret.append('        $this->' + arg.name + ' = $' +
                             arg.name + ';')
                     ret.append('    }')
@@ -168,15 +178,15 @@ class PhpLanguageGenerator(LanguageGenerator):
                     '',
                 ])
 
-                for arg in whc.arguments:
+                # FIXME allow for code.
+                for arg in sql.arguments:
                     ret.append('        $data["' + arg.name + '"] = $this->' +
                         arg.name + ';')
                 ret.extend([
                     '    }', '', ''
                     '    public function __toString() {',
-                    '        return \'' + escape_php_string(
-                        whc.sql_args(config.platforms,
-                            config.prep_sql_converter_func)) + '\';',
+                    '        return "' + escape_php_string(
+                        config.prep_sql_converter.generate_sql(sql)) + '";',
                     '    }', '',
                     '}', ''
                 ])
@@ -419,49 +429,338 @@ class PhpLanguageGenerator(LanguageGenerator):
 
     def generate_create(self, config):
         assert isinstance(config, PhpGenConfig)
+        assert not config.analysis_obj.is_read_only
 
-        # FIXME
+        create = CreateQuery(config.analysis_obj)
+
+        php_argument_list = [('$' + arg)
+            for arg in create.required_input_arguments]
+        php_argument_list.extend([('$' + arg + ' = false')
+            for arg in create.optional_input_arguments])
+
+        # we can have no arguments if the table is essentially just an ID.
+        php_argument_str = ''
+        if len(php_argument_list) > 0:
+            php_argument_str = ', ' + (', '.join(php_argument_list))
+
+        ret = [
+            '',
+            '    public function create($db' + php_argument_str + ') {',
+            '        $columns = array();',
+            '        $values = array();',
+            '        $data = array();',
+        ]
+
+        for arg in create.required_input_values:
+            php_code, sql_key, sql_value = PhpLanguageGenerator._convert_arg(
+                config, arg, True)
+            ret.append('        $columns[] = "' +
+                escape_php_string(arg.column_name) + '";')
+            if php_code is not None:
+                ret.extend(php_code)
+                ret.append('        $values[] = $tmpSql;')
+            else:
+                ret.append('        $values[] = "' +
+                    escape_php_string(sql_value) + '";')
+
+            for anx in create.value_arguments[arg]:
+                ret.append('        $data["' + anx.name +
+                    '"] = $' + anx.name + ';')
+
+        for arg in create.optional_input_values:
+            optional_arg = []
+            for var in create.value_arguments[arg]:
+                if var.name in create.optional_input_arguments:
+                    optional_arg.append(var.name)
+            ret.extend([
+                '        if (' + (' && '.join(('$' + var + ' !== false')
+                    for var in optional_arg)) + ') {',
+                '            $columns[] = "' +
+                    escape_php_string(arg.column_name) + '";'
+            ])
+
+            php_code, sql_key, sql_value = PhpLanguageGenerator._convert_arg(
+                config, arg, True)
+            if php_code is not None:
+                ret.extend(php_code)
+                ret.append('            $values[] = $tmpSql;')
+            else:
+                ret.append('            $values[] = "' +
+                    escape_php_string(sql_value) + '";')
+
+            for anx in create.value_arguments[arg]:
+                ret.append('            $data["' + anx.name +
+                    '"] = $' + anx.name + ';')
+
+            php_code, sql_key, sql_value = PhpLanguageGenerator._convert_arg(
+                config, arg, False)
+            if php_code is not None or sql_key is not None:
+                ret.extend(['        } else {'
+                    '            $columns[] = "' +
+                        escape_php_string(arg.column_name) + '";'
+                    ])
+                if php_code is not None:
+                    ret.extend(php_code)
+                    ret.append('            $values[] = $tmpSql;')
+                else:
+                    ret.append('            $values[] = "' +
+                        escape_php_string(sql_value) + '";')
+
+                for argv in [ arg.get_code(False), arg.get_sql(False) ]:
+                    for argx in argv.arguments:
+                        ret.append('            $data["' + argx.name +
+                            '"] = $' + argx.name + ';')
+
+            ret.append('        }')
+
+        # FIXME This "where" doesn't really work right, and it doesn't look like it
+        # will ever really work right (for MySql anyway).
+        # has_where = len(create.where_values) > 0
+        # if has_where:
+        #    ret.append('        $where = " FROM ' + analysis_obj.sql_name +
+        #               ' WHERE 1 = 1";')
+        #    for wr in create.where_values[r]:
+        #        assert isinstance(wr, InputValue)
+        #        code = wr.get_code_value(True)
+        #        if code is not None:
+        #            ret.append(code)
+        #        for arg in wr.get_sql_arguments(True):
+        #            assert isinstance(arg, sqlmigration.model.SqlArgument)
+        #            data_values.append('            \'' + arg.name +
+        #                '\' => $' + arg.name + ',')
+        #        ret.append('        $where .= \' AND ' + wr.get_sql_value(True) +
+        #                   '\';')
+        #        # Also for the optional values....
+        # This would change the construction of the insert statement into one
+        # that includes a sub-select.
+
+        ret.extend([
+            '        if (! $this->validateWrite($data)) {',
+            '            return false;',
+            '        }',
+            '        $sql = "INSERT INTO ' + escape_php_string(
+                config.sql_name) +
+            ' (".join(", ", $columns).") VALUES (".join(", ", $values).")";'
+        ])
+        ret.extend(self._generate_sql())
+        ret.extend([
+            '        $ret = $this->createReturn($stmt, function ($s) {',
+            '            return true;',
+            '        });',
+        ])
+
+        if create.generated_column_name is not None:
+            ret.append('        $ret["result"] = $db->lastInsertId();')
+
+        ret.extend([
+            '        return $ret;',
+            '    }', ''
+        ])
 
 
+        # -------------------------------------------------------------------
+        # Create the upsert command (insert or update if exists)
+        # We should only generate this if:
+        #   - there is no autoincrement column
+        #   - there is a unique index or primary key
+        # We should also generate this for each primary key / unique index.
 
-        raise NotImplementedError()
+
+        primary_keys = config.analysis_obj.primary_key_columns
+        allow_upsert = len(primary_keys) > 0
+        for pkey in primary_keys:
+            assert isinstance(pkey, ColumnAnalysis)
+            if pkey.auto_gen:
+                allow_upsert = False
+            else:
+                if php_argument_list.count('$' + pkey.sql_name) > 0:
+                    php_argument_list.remove('$' + pkey.sql_name)
+        allow_upsert = allow_upsert and len(php_argument_list) > 0
+
+        if allow_upsert:
+            # print("non index required columns: " +
+            #    repr(non_index_required_columns))
+            update_values = {}
+            for cfu in config.analysis_obj.columns_for_update:
+                assert isinstance(cfu, ColumnAnalysis)
+                cuv = cfu.update_value
+                if cuv is not None:
+                    cuvc = cuv.constraint
+                    # TODO in the future, this might be code
+                    assert isinstance(cuvc, SqlConstraint)
+                    update_values[cfu.sql_name] = (
+                        config.prep_sql_converter.generate_sql(cuvc))
+                else:
+                    update_values[cfu.sql_name] = (
+                        config.prep_sql_converter.generate_sql(
+                            cfu.name_as_sql_argument))
+
+            ret.extend([
+                '',
+                '    public function upsert($db, $' +
+                (', $'.join(c.sql_name for c in primary_keys)) + ', ' +
+                (', '.join(php_argument_list)) +
+                ') {',
+                '        $columns = array();',
+                '        $values = array();',
+                '        $dups = array();',
+                '        $data = array();'
+            ])
+
+            for pkey in primary_keys:
+                # Primary key columns are always (!) straight values.
+                # If they aren't, then the user did something wrong.
+                assert isinstance(pkey, ColumnAnalysis)
+                val = InputValue.create_direct_value(pkey, True, False)
+                val_sql = config.prep_sql_converter.generate_sql(
+                    val.get_sql(True))
+                ret.extend([
+                    '        $columns[] = "' +
+                        escape_php_string(pkey.sql_name) + '";',
+                    '        $values[] = "' +
+                        escape_php_string(val_sql) + '";',
+                    '        $data["' + escape_php_string(pkey.sql_name) +
+                        '"] = $' + pkey.sql_name + ';'
+                ])
+
+            # This required + optional values are really close to the above
+            # code, but are slightly different.
+            for arg in create.required_input_values:
+                assert isinstance(arg, InputValue)
+                # don't re-add the primary key columns here
+                if arg.column in primary_keys:
+                    # Remember the comment above about the user doing something
+                    # wrong with primary keys?  This is where we check that
+                    # the user did it right.
+                    if (len(create.value_arguments[arg]) != 1 or
+                            not isinstance(
+                                create.value_arguments[arg][0], SqlArgument)):
+                        raise Exception("primary key columns cannot be complex")
+                    continue
+
+                php_code, sql_key, sql_value = (
+                    PhpLanguageGenerator._convert_arg(config, arg, True))
+                ret.append('        $columns[] = "' +
+                    escape_php_string(arg.column_name) + '";')
+                if php_code is not None:
+                    ret.extend(php_code)
+                    ret.append('        $values[] = $tmpSql;')
+                    ret.append('        $dups[] = "' +
+                        escape_php_string(arg.column_name + ' = ') +
+                        '".$tmpSql;')
+                else:
+                    ret.append('        $values[] = "' +
+                        escape_php_string(sql_value) + '";')
+                    ret.append('        $dups[] = "' +
+                        escape_php_string(arg.column_name + ' = ' +
+                            sql_value) + '";')
+
+                for anx in create.value_arguments[arg]:
+                    ret.append('        $data["' + anx.name +
+                        '"] = $' + anx.name + ';')
+
+            for arg in create.optional_input_values:
+                optional_arg = []
+                for var in create.value_arguments[arg]:
+                    if var.name in create.optional_input_arguments:
+                        optional_arg.append(var.name)
+                ret.extend([
+                    '        if (' + (' && '.join(('$' + var + ' !== false')
+                        for var in optional_arg)) + ') {',
+                    '            $columns[] = "' +
+                        escape_php_string(arg.column_name) + '";'
+                ])
+
+                php_code, sql_key, sql_value = (
+                    PhpLanguageGenerator._convert_arg(config, arg, True))
+                if php_code is not None:
+                    ret.extend(php_code)
+                    ret.append('            $values[] = $tmpSql;')
+                    ret.append('            $dups[] = "' +
+                        escape_php_string(arg.column_name + ' = ') +
+                        '".$tmpSql;')
+                else:
+                    ret.append('            $values[] = "' +
+                        escape_php_string(sql_value) + '";')
+                    ret.append('            $dups[] = "' +
+                        escape_php_string(arg.column_name + ' = ' +
+                            sql_value) + '";')
+
+                for anx in create.value_arguments[arg]:
+                    ret.append('            $data["' + anx.name +
+                        '"] = $' + anx.name + ';')
+
+                php_code, sql_key, sql_value = (
+                    PhpLanguageGenerator._convert_arg(config, arg, False))
+                if php_code is not None or sql_key is not None:
+                    ret.extend(['        } else {'
+                        '            $columns[] = "' +
+                            escape_php_string(arg.column_name) + '";'
+                        ])
+
+                    if php_code is not None:
+                        ret.extend(php_code)
+                        ret.append('            $values[] = $tmpSql;')
+                        ret.append('            $dups[] = "' +
+                            escape_php_string(arg.column_name + ' = ') +
+                            '".$tmpSql;')
+                    else:
+                        ret.append('            $values[] = "' +
+                            escape_php_string(sql_value) + '";')
+                        ret.append('            $dups[] = "' +
+                            escape_php_string(arg.column_name + ' = ' +
+                                sql_value) + '";')
+
+                    for argv in [ arg.get_code(False), arg.get_sql(False) ]:
+                        for argx in argv.arguments:
+                            ret.append('            $data["' + argx.name +
+                                '"] = $' + argx.name + ';')
+
+                ret.append('        }')
+
+            ret.extend([
+                '        if (! $this->validateWrite($data)) {',
+                '            return false;',
+                '        }',
+            ])
+
+            ret.extend([
+                '        $sql = "' + escape_php_string('INSERT INTO ' +
+                    config.sql_name + ' (') + '".join(", ", $columns)."' +
+                    escape_php_string(') VALUES (') +
+                    '".join(", ", $values)."' + escape_php_string(
+                    ' ON DUPLICATE KEY UPDATE ') + '".join(", ", $dups);'
+            ])
+
+            ret.extend(self._generate_sql())
+
+            ret.extend([
+                '        $ret = $this->createReturn($stmt, function ($s) {',
+                '            return true;',
+                '        });',
+                '    }', ''
+            ])
+
+
+        return ret
 
     def generate_update(self, config):
         assert isinstance(config, PhpGenConfig)
 
-        update = UpdateQuery(config.analysis_obj, config.platforms, 'php',
-            config.prep_sql_converter_func)
+        update = UpdateQuery(config.analysis_obj)
 
-        if len(update.optional_input_arguments) <= 0:
+        if (len(update.required_input_arguments) +
+                len(update.optional_input_arguments)) <= 0:
             # Nothing to do
+            print("NOTICE: " + config.class_name +
+                " - No input arguments.  No update!")
             return []
 
         if len(update.primary_key_columns) <= 0:
-            raise Exception("cannot update table " +
-                "because there is no primary key")
-
-        def convert_arg(arg, is_required):
-            assert isinstance(arg, InputValue)
-            sql_key = None
-            sql_value = None
-            php_code = None
-
-            code = arg.get_code(is_required)
-            if code is not None:
-                # We need to construct the wrapper code.
-                assert isinstance(code, LanguageSet)
-                php_code = [
-                    config.prep_sql_converter.generate_code('$tmpSql', code),
-                ]
-            else:
-                sql = arg.get_sql(is_required)
-                if sql is not None:
-                    assert isinstance(sql, SqlSet)
-                    sql_key = arg.column_name
-                    sql_value = config.prep_sql_converter.generate_sql(arg)
-
-            return (php_code, sql_key, sql_value)
-
+            # Nothing to do again
+            print("NOTICE: " + config.class_name +
+                  " - No primary key. No update!")
+            return []
 
         req_pair_strs = {}
         req_pair_code = []
@@ -471,7 +770,8 @@ class PhpLanguageGenerator(LanguageGenerator):
         # directly loading the sql-only bits into the original string.
         for arg in update.required_input_values:
             assert isinstance(arg, InputValue)
-            php_code, sql_key, sql_value = convert_arg(arg, True)
+            php_code, sql_key, sql_value = PhpLanguageGenerator._convert_arg(
+                config, arg, True)
             if php_code is not None:
                 req_pair_code.extend(php_code)
                 req_pair_code.append('        $pairs[] = "' +
@@ -479,16 +779,23 @@ class PhpLanguageGenerator(LanguageGenerator):
             else:
                 req_pair_strs[sql_key] = sql_value
 
+        php_arguments = [
+             ('$' + arg.column_name)
+             for arg in update.primary_key_values
+        ]
+        php_arguments.extend([
+             ('$' + arg)
+             for arg in update.required_input_arguments
+        ])
+        php_arguments.extend([
+             ('$' + arg + ' = false')
+             for arg in update.optional_input_arguments
+        ])
+
         ret = [
             '',
-            '    public function update($db, ' +
-            (', '.join(
-                ('$' + arg)
-                    for arg in update.required_input_arguments)) + ', ' +
-            (', '.join(
-               ('$' + arg + ' = false')
-                   for arg in update.optional_input_arguments)) +
-            ') {',
+            '    public function update($db, ' + ', '.join(php_arguments) +
+                ') {',
             '        $sql = "' + escape_php_string('UPDATE ' +
                 config.sql_name + ' SET ') + '";',
             '        $pairs = array(',
@@ -522,7 +829,8 @@ class PhpLanguageGenerator(LanguageGenerator):
                 ' && '.join(('$' + var + ' !== false')
                     for var in optional_arg)) + ') {')
 
-            php_code, sql_key, sql_value = convert_arg(arg, True)
+            php_code, sql_key, sql_value = PhpLanguageGenerator._convert_arg(
+                config, arg, True)
             if php_code is not None:
                 ret.extend(php_code)
                 ret.append('        $pairs[] = "' +
@@ -536,7 +844,8 @@ class PhpLanguageGenerator(LanguageGenerator):
                 ret.append('            $data["' + anx.name +
                     '"] = $' + anx.name + ';')
 
-            php_code, sql_key, sql_value = convert_arg(arg, False)
+            php_code, sql_key, sql_value = PhpLanguageGenerator._convert_arg(
+                config, arg, False)
             if php_code is not None or sql_key is not None:
                 ret.append('        } else {')
                 if php_code is not None:
@@ -564,12 +873,14 @@ class PhpLanguageGenerator(LanguageGenerator):
         # Where clause
         where_ands = []
         where_ands_code = []
+        where_data = []
         for val in update.where_values:
             # FIXME for now, we assume that all these where clauses are
             # required.
 
             assert isinstance(val, InputValue)
-            php_code, sql_key, sql_value = convert_arg(val, True)
+            php_code, sql_key, sql_value = PhpLanguageGenerator._convert_arg(
+                config, val, True)
             if php_code is not None:
                 # Note that we require the PHP code AND the sql to both be
                 # in the correct where-clause form (a = b or whichever is
@@ -577,12 +888,19 @@ class PhpLanguageGenerator(LanguageGenerator):
                 where_ands_code.extend(php_code)
                 where_ands_code.extend('        $pairs[] = $tmpSql;')
             else:
-                where_ands.append(sql_value)
+                where_ands.append('"' + escape_php_string(sql_value) + '"')
+            for arg_list in [ val.get_code(True), val.get_sql(True) ]:
+                if arg_list is not None:
+                    for arg in arg_list.arguments:
+                        where_data.append('        $data["' +
+                              escape_php_string(arg.name) +
+                              '"] = $' + arg.name + ';')
 
         for wand in where_ands:
             ret.append('            ' + wand + ',')
         ret.append('        );')
         ret.extend(where_ands_code)
+        ret.extend(where_data)
         ret.append('        $sql .= join(" AND ", $pairs);')
 
         # FIXME check if updated row count was 0, and if so report an error.
@@ -608,6 +926,7 @@ class PhpLanguageGenerator(LanguageGenerator):
                   config.analysis_obj.sql_name)
             return []
 
+        # FIXME change this to use the converter
         sql = escape_php_string('DELETE FROM ' + config.analysis_obj.sql_name +
             ' WHERE ' + ' AND '.join([
                 (col.sql_name + ' = :' + col.sql_name)
@@ -625,7 +944,7 @@ class PhpLanguageGenerator(LanguageGenerator):
                 col.sql_name + ',')
         ret.append('        );')
 
-        ret.extend(self._generate_sql(sql_val = sql))
+        ret.extend(self._generate_sql(sql_val = '"' + sql + '"'))
 
         ret.extend([
             '        return $this->createReturn($stmt, function ($s) {',
@@ -646,18 +965,18 @@ class PhpLanguageGenerator(LanguageGenerator):
         arg_prefix = ''
         if len(extended_sql.arguments) > 0:
             arg_prefix = ', '
-        funcdecl_str = (php_name + '($db' + arg_prefix +
-            (', '.join(('$' + a.name) for a in extended_sql.arguments)))
 
         ret = [
             '',
-            '    public function run' + funcdecl_str +
+            '    public function run' + php_name + '($db' + arg_prefix +
+                (', '.join(('$' + arg.name)
+                    for arg in extended_sql.arguments)) +
                 ', $start = -1, $end = -1) {',
-            '        $sql = \'' + escape_php_string(
-                extended_sql.sql_args(
-                    config.platforms, config.prep_sql_converter_func)) + '\';',
+            '        $sql = "' + escape_php_string(
+                config.prep_sql_converter.generate_sql(extended_sql.sql)) +
+                '";',
             '        if ($start >= 0 && $end > 0) {',
-            '            $sql .= \' LIMIT \'.$start.\',\'.$end;',
+            '            $sql .= " LIMIT ".$start.", ".$end;',
             '        }',
             '        $data = array(',
         ]
@@ -710,9 +1029,9 @@ class PhpLanguageGenerator(LanguageGenerator):
             assert isinstance(arg, SqlArgument)
             ret.append('            "' + arg.name + '" => $' + arg.name + ',')
         ret.append("        );")
-        ret.append('        $sql = \'' + escape_php_string(
-                extended_sql.sql_args(
-                    config.platforms, config.prep_sql_converter_func)) + '\';')
+        ret.append('        $sql = "' + escape_php_string(
+            config.prep_sql_converter.generate_sql(extended_sql.sql)) +
+            '";')
         ret.extend(self._generate_sql())
         ret.extend([
             '        $errs = $stmt->errorInfo();',
@@ -726,9 +1045,10 @@ class PhpLanguageGenerator(LanguageGenerator):
             '        } catch (Exception $e) {',
             '            $except = $e;',
             '        }',
-            '        $sql = \'' + escape_php_string(
-                extended_sql.post_sql_args(
-                    config.platforms, config.prep_sql_converter_func)) + '\';'])
+            '        $sql = "' + escape_php_string(
+                config.prep_sql_converter.generate_sql(extended_sql.post_sql)) +
+                '";'
+        ])
         ret.extend(self._generate_sql())
         ret.extend([
             '        $errs = $stmt->errorInfo();',
@@ -876,7 +1196,7 @@ class PhpLanguageGenerator(LanguageGenerator):
         ret = []
         if len(analysis_obj.schema.where_clauses) > 0:
             ret.append(
-                '        if ($whereClauses !== null) {')
+                '        if ($whereClauses !== null && sizeof($whereClauses) > 0) {')
             if already_added_where:
                 ret.extend([
                 '            foreach ($whereClauses as $w) {',
@@ -895,3 +1215,28 @@ class PhpLanguageGenerator(LanguageGenerator):
                 ])
             ret.append('        }')
         return ret
+
+    @staticmethod
+    def _convert_arg(config, arg, is_required):
+        assert isinstance(config, PhpGenConfig)
+        assert isinstance(arg, InputValue)
+        assert isinstance(is_required, bool)
+        sql_key = None
+        sql_value = None
+        php_code = None
+
+        code = arg.get_code(is_required)
+        if code is not None:
+            # We need to construct the wrapper code.
+            assert isinstance(code, LanguageSet)
+            php_code = [
+                config.prep_sql_converter.generate_code('$tmpSql', code),
+            ]
+        else:
+            sql = arg.get_sql(is_required)
+            if sql is not None:
+                assert isinstance(sql, SqlSet)
+                sql_key = arg.column_name
+                sql_value = config.prep_sql_converter.generate_sql(sql)
+
+        return (php_code, sql_key, sql_value)

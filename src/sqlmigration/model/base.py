@@ -13,22 +13,22 @@ class Order(object):
         if not len(order) == 3:
             raise Exception("order must be of length 3, but found " +
                             repr(order))
-        self.__order = (int(order[0]), int(order[1]), int(order[2]))
+        self._order = (int(order[0]), int(order[1]), int(order[2]))
 
     def items(self):
-        return self.__order
+        return self._order
 
     def __str__(self):
-        return repr(self.__order)
+        return repr(self._order)
 
     def __repr__(self):
-        return 'Order(' + repr(self.__order) + ')'
+        return 'Order(' + repr(self._order) + ')'
 
     def __sub__(self, other):
         assert isinstance(other, Order)
-        assert len(self.__order) == len(other.__order)
-        for i in range(0, len(self.__order)):
-            x = self.__order[i] - other.__order[i]
+        assert len(self._order) == len(other._order)
+        for i in range(0, len(self._order)):
+            x = self._order[i] - other._order[i]
             if x != 0:
                 return x
         return 0

@@ -117,7 +117,6 @@ class FileGen(object):
             self.__output(config, out, self.generate_read(config))
 
             if not config.analysis_obj.is_read_only:
-
                 self.__output(config, out, self.generate_create(config))
                 self.__output(config, out, self.generate_update(config))
                 self.__output(config, out, self.generate_delete(config))
@@ -140,7 +139,7 @@ class FileGen(object):
         :return: a list of strings, one per line for the source
         """
         assert isinstance(config, GenConfig)
-        return self.lang_gen.generate_update(config)
+        return self.lang_gen.generate_create(config)
 
     def generate_update(self, config):
         """
@@ -182,7 +181,7 @@ class FileGen(object):
         # FIXME split into table validations (read & write), read validations,
         # and write validations.
 
-        return self.lang_gen.generate_validations()
+        return self.lang_gen.generate_validations(config)
 
     def __output(self, config, out, lines):
         # FIXME test for iterable instead?

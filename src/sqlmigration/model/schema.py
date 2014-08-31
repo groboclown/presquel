@@ -132,14 +132,14 @@ class Constraint(SchemaObject):
     def get_columns_by_names(self, parent_schema):
         """
 
-        :return: list of __columns in the parent_schema that match the
+        :return: list of columns in the parent_schema that match the
             column_names.  The column_names order will be maintained.
         """
         assert (isinstance(parent_schema, Table) or
                 isinstance(parent_schema, View))
         ret = []
         for cn in self.column_names:
-            for col in parent_schema.__columns:
+            for col in parent_schema.columns:
                 if col.name == cn:
                     ret.append(col)
         return ret
@@ -282,21 +282,6 @@ class WhereClause(object):
     def sql(self):
         return self.__sqlset
 
-    @property
-    def arguments(self):
-        return self.sql.arguments
-
-    def sql_args(self, platforms, arg_converter):
-        """
-        Return the sql for the given platforms, with the argument values
-        replaced, using the function "arg_converter", which takes the argument
-        name as input, and outputs the prepared statement replacement string.
-
-        :param arg_converter:
-        :return:
-        """
-        return self.sql.sql_args(platforms, arg_converter)
-
 
 class ExtendedSql(object):
     """
@@ -383,7 +368,7 @@ class ExtendedSql(object):
 
 class ColumnarSchemaObject(SchemaObject):
     """
-    A schema type that has __columns.  This includes tables, views, and stored
+    A schema type that has columns.  This includes tables, views, and stored
     procedures that return tables.
     """
     def __init__(self, order, comment, catalog_name, schema_name, name,
@@ -407,7 +392,7 @@ class ColumnarSchemaObject(SchemaObject):
         return self.__schema_name
 
     @property
-    def __columns(self):
+    def columns(self):
         return self.__columns
 
     @property
@@ -430,7 +415,7 @@ class ColumnarSchemaObject(SchemaObject):
 
     @property
     def sub_schema(self):
-        ret = list(self.__columns)
+        ret = list(self.columns)
         ret.extend(self.constraints)
         return ret
 
