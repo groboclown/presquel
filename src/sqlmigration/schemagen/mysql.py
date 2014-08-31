@@ -7,7 +7,7 @@ from ..model import (ValueTypeValue, View, Table, SqlString, SqlSet, Constraint,
 from .base import (SchemaScriptGenerator)
 import time
 
-PLATFORMS = ('mysql', )
+PLATFORMS = ('mysql',)
 
 
 class MySqlScriptGenerator(SchemaScriptGenerator):
@@ -32,8 +32,8 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
         return False
 
     def _header(self, schema_object):
-        return '-- Schema for ' + schema_object.name +\
-               '\n-- Generated on ' + time.asctime(time.gmtime(time.time())) +\
+        return '-- Schema for ' + schema_object.name + \
+               '\n-- Generated on ' + time.asctime(time.gmtime(time.time())) + \
                '\n\n'
 
     def _generate_base_table(self, table):
@@ -59,7 +59,7 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
 
         sql += ' (\n'
         first = True
-        for col in table.__columns:
+        for col in table.columns:
             if first:
                 first = False
                 sql += '    '
@@ -73,7 +73,7 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
                     sql += ' NOT NULL'
                 elif (ct.constraint_type == 'nullable' or
                         ct.constraint_type == 'null'):
-                    #print("null constraint")
+                    # print("null constraint")
                     sql += ' NULL'
 
             if col.default_value is not None:
@@ -351,7 +351,7 @@ def _generate_base_constraints(table, columns, ct):
     elif ct.constraint_type == 'foreignkey':
         assert name is not None
         if (('column' not in ct.details and
-                '__columns' not in ct.details) or
+                'columns' not in ct.details) or
                 'table' not in ct.details):
             raise Exception("column and table must be in foreign "
                             "key; found in " + column_names + " in " +
@@ -362,9 +362,9 @@ def _generate_base_constraints(table, columns, ct):
                           _parse_name(ct.details['table']) + ' ('
         if 'column' in ct.details:
             constraint_sql += _parse_name(ct.details['column'])
-        elif '__columns' in ct.details:
+        elif 'columns' in ct.details:
             constraint_sql += ",".join(
-                _parse_name(fc) for fc in ct.details['__columns'])
+                _parse_name(fc) for fc in ct.details['columns'])
         else:
             raise Exception("no column definition for foreignkey")
         constraint_sql += ')'
