@@ -729,7 +729,7 @@ class PhpLanguageGenerator(LanguageGenerator):
                     config.sql_name + ' (') + '".join(", ", $columns)."' +
                     escape_php_string(') VALUES (') +
                     '".join(", ", $values)."' + escape_php_string(
-                    ' ON DUPLICATE KEY UPDATE ') + '".join(", ", $dups);'
+                    ') ON DUPLICATE KEY UPDATE ') + '".join(", ", $dups);'
             ])
 
             ret.extend(self._generate_sql())
