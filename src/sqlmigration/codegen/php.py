@@ -86,6 +86,9 @@ class PhpGenConfig(GenConfig):
 
 
 class PhpLanguageGenerator(LanguageGenerator):
+    """
+    Generates PHP code.
+    """
     def __init__(self):
         LanguageGenerator.__init__(self)
 
@@ -218,11 +221,14 @@ class PhpLanguageGenerator(LanguageGenerator):
             '    /**',
             '     * Returns the number of rows in the table.',
             '     */',
-            '    public function countAll($db' + where_arg + ') {',
+            '    public function countAll($db' + where_arg + ') {'
+        ]
+        ret.extend(self._generate_invoke_init(config, 'countAll'))
+        ret.extend([
             '        $sql = \'SELECT COUNT(*) FROM ' + config.sql_name +
             '\';',
             '        $data = array();',
-        ]
+        ])
         ret.extend(PhpLanguageGenerator._generate_where_clause(
                config.analysis_obj, False))
         ret.extend(self._generate_sql())
@@ -239,9 +245,10 @@ class PhpLanguageGenerator(LanguageGenerator):
             '     * Reads the row data without filters.',
             '     */',
             '    public function readAll($db' + arg_arg + where_arg +
-            ', $order = false, $start = -1, $end = -1) {',
-            '        $sql = \'' + escaped_sql + '\';',
+            ', $order = false, $start = -1, $end = -1) {'
         ])
+        ret.extend(self._generate_invoke_init(config, 'readAll'))
+        ret.append('        $sql = \'' + escaped_sql + '\';')
         if len(arg_names) > 0:
             ret.append('        $data = array(')
             # Notice how this skips the use of arg_names, and recreates those values
@@ -304,7 +311,10 @@ class PhpLanguageGenerator(LanguageGenerator):
         ret.extend([
             '',
             '    public function countAny($db, $whereClause = false, '
-            '$data = false) {',
+            '$data = false) {'
+        ])
+        ret.extend(self._generate_invoke_init(config, 'countAny'))
+        ret.extend([
             '        $whereClause = $whereClause || "";',
             '        $data = $data || array();',
             '        $stmt = $db->prepare(\'SELECT COUNT(*) FROM ' +
@@ -315,7 +325,10 @@ class PhpLanguageGenerator(LanguageGenerator):
             '        });',
             '    }', '', '',
             '    public function readAny($db, $query, $data, $start = -1, '
-            '$end = -1) {',
+            '$end = -1) {'
+        ])
+        ret.extend(self._generate_invoke_init(config, 'readAny'))
+        ret.extend([
             '        if ($start >= 0 && $end > 0) {',
             '            $query .= \' LIMIT \'.$start.\',\'.$end;',
             '        }'
@@ -374,9 +387,10 @@ class PhpLanguageGenerator(LanguageGenerator):
             ret.extend([
                 '',
                 '    public function countBy_' + title + '($db, ' + args +
-                where_arg + ') {',
-                '        $sql = \'SELECT COUNT(*) ' + clause_sql + '\';',
+                where_arg + ') {'
             ])
+            ret.extend(self._generate_invoke_init(config, 'countBy_' + title))
+            ret.append('        $sql = \'SELECT COUNT(*) ' + clause_sql + '\';')
             ret.extend(setup_code)
             ret.extend(PhpLanguageGenerator._generate_where_clause(
                 config.analysis_obj, True))
@@ -387,9 +401,10 @@ class PhpLanguageGenerator(LanguageGenerator):
                 '        });',
                 '    }', '' '',
                 '    public function readBy_' + title + '($db, ' + args +
-                where_arg + ', $order = false, $start = -1, $end = -1) {',
-                '        $sql = \'' + select + '\';',
+                where_arg + ', $order = false, $start = -1, $end = -1) {'
             ])
+            ret.extend(self._generate_invoke_init(config, 'readBy_' + title))
+            ret.append('        $sql = \'' + select + '\';')
             ret.extend(setup_code)
             ret.extend(PhpLanguageGenerator._generate_where_clause(
                 config.analysis_obj, True))
@@ -445,11 +460,14 @@ class PhpLanguageGenerator(LanguageGenerator):
 
         ret = [
             '',
-            '    public function create($db' + php_argument_str + ') {',
+            '    public function create($db' + php_argument_str + ') {'
+        ]
+        ret.extend(self._generate_invoke_init(config, 'create'))
+        ret.extend([
             '        $columns = array();',
             '        $values = array();',
             '        $data = array();',
-        ]
+        ])
 
         for arg in create.required_input_values:
             php_code, sql_key, sql_value = PhpLanguageGenerator._convert_arg(
@@ -600,7 +618,10 @@ class PhpLanguageGenerator(LanguageGenerator):
                 '    public function upsert($db, $' +
                 (', $'.join(c.sql_name for c in primary_keys)) + ', ' +
                 (', '.join(php_argument_list)) +
-                ') {',
+                ') {'
+            ])
+            ret.extend(self._generate_invoke_init(config, 'upsert'))
+            ret.extend([
                 '        $columns = array();',
                 '        $values = array();',
                 '        $dups = array();',
@@ -752,14 +773,14 @@ class PhpLanguageGenerator(LanguageGenerator):
         if (len(update.required_input_arguments) +
                 len(update.optional_input_arguments)) <= 0:
             # Nothing to do
-            print("NOTICE: " + config.class_name +
-                " - No input arguments.  No update!")
+            # print("NOTICE: " + config.class_name +
+            #    " - No input arguments.  No update!")
             return []
 
         if len(update.primary_key_columns) <= 0:
             # Nothing to do again
-            print("NOTICE: " + config.class_name +
-                  " - No primary key. No update!")
+            # print("NOTICE: " + config.class_name +
+            #      " - No primary key. No update!")
             return []
 
         req_pair_strs = {}
@@ -795,11 +816,14 @@ class PhpLanguageGenerator(LanguageGenerator):
         ret = [
             '',
             '    public function update($db, ' + ', '.join(php_arguments) +
-                ') {',
+                ') {'
+        ]
+        ret.extend(self._generate_invoke_init(config, 'update'))
+        ret.extend([
             '        $sql = "' + escape_php_string('UPDATE ' +
                 config.sql_name + ' SET ') + '";',
             '        $pairs = array(',
-        ]
+        ])
 
         # Required values
         for col, sql in req_pair_strs.items():
@@ -922,8 +946,8 @@ class PhpLanguageGenerator(LanguageGenerator):
             for col in config.analysis_obj.primary_key_columns
         ]
         if len(args) <= 0:
-            print("** WARNING: no way to delete " +
-                  config.analysis_obj.sql_name)
+            # print("** WARNING: no way to delete " +
+            #      config.analysis_obj.sql_name)
             return []
 
         # FIXME change this to use the converter
@@ -935,9 +959,10 @@ class PhpLanguageGenerator(LanguageGenerator):
 
         ret = [
             '',
-            '    public function remove($db, ' + ', '.join(args) + ') {',
-            '        $data = array(',
+            '    public function remove($db, ' + ', '.join(args) + ') {'
         ]
+        ret.extend(self._generate_invoke_init(config, 'remove'))
+        ret.append('        $data = array(')
 
         for col in config.analysis_obj.primary_key_columns:
             ret.append('            "' + col.sql_name + '" => $' +
@@ -971,7 +996,10 @@ class PhpLanguageGenerator(LanguageGenerator):
             '    public function run' + php_name + '($db' + arg_prefix +
                 (', '.join(('$' + arg.name)
                     for arg in extended_sql.arguments)) +
-                ', $start = -1, $end = -1) {',
+                ', $start = -1, $end = -1) {'
+        ]
+        ret.extend(self._generate_invoke_init(config, 'run' + php_name))
+        ret.extend([
             '        $sql = "' + escape_php_string(
                 config.prep_sql_converter.generate_sql(extended_sql.sql)) +
                 '";',
@@ -979,7 +1007,7 @@ class PhpLanguageGenerator(LanguageGenerator):
             '            $sql .= " LIMIT ".$start.", ".$end;',
             '        }',
             '        $data = array(',
-        ]
+        ])
 
         for arg in extended_sql.arguments:
             assert isinstance(arg, SqlArgument)
@@ -1022,9 +1050,10 @@ class PhpLanguageGenerator(LanguageGenerator):
         ret = [
             '',
             '    public function wrap' + funcdecl_str +
-                ', $invoker_arg, $invoker) {',
-            '        $data = array(',
+                ', $invoker_arg, $invoker) {'
         ]
+        ret.extend(self._generate_invoke_init(config, 'wrap' + php_name))
+        ret.append('        $data = array(')
         for arg in extended_sql.arguments:
             assert isinstance(arg, SqlArgument)
             ret.append('            "' + arg.name + '" => $' + arg.name + ',')
@@ -1170,6 +1199,14 @@ class PhpLanguageGenerator(LanguageGenerator):
         ]
         return ret
 
+    def _generate_invoke_init(self, config, method_name):
+        """
+        Generate some code that starts at the beginning of a method call.  This
+        can be logging and any number of other actions.
+        """
+        assert isinstance(config, PhpGenConfig)
+        assert isinstance(method_name, str)
+        return []
 
     def _generate_sql(self, indent_str = '        ',
                      stmt_var = '$stmt',
