@@ -2,8 +2,9 @@
 Base classes used for the generation of code based on the model objects.
 """
 
-from ..model import (ValueTypeValue, View, Table, SqlString, SqlSet, Constraint,
-                     NamedConstraint, SqlConstraint, LanguageConstraint)
+from ..model.base import (SqlString, SqlSet)
+from ..model.schema import (View, Table, Constraint, NamedConstraint,
+    SqlConstraint, LanguageConstraint, ValueTypeValue)
 from .base import (SchemaScriptGenerator)
 import time
 
@@ -26,12 +27,15 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
         :param platforms:
         :return: boolean
         """
-        for p in platforms:
-            if p.strip().lower() in PLATFORMS:
+        for plat in platforms:
+            if plat.strip().lower() in PLATFORMS:
                 return True
         return False
 
     def _header(self, schema_object):
+        """
+        Create the header comment for the schema file.
+        """
         return '-- Schema for ' + schema_object.name + \
                '\n-- Generated on ' + time.asctime(time.gmtime(time.time())) + \
                '\n\n'
@@ -68,11 +72,11 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
             sql += _parse_name(col.name) + ' ' + _parse_value_type(
                 col.value_type)
 
-            for ct in col.constraints:
-                if ct.constraint_type == 'notnull':
+            for cst in col.constraints:
+                if cst.constraint_type == 'notnull':
                     sql += ' NOT NULL'
-                elif (ct.constraint_type == 'nullable' or
-                        ct.constraint_type == 'null'):
+                elif (cst.constraint_type == 'nullable' or
+                        cst.constraint_type == 'null'):
                     # print("null constraint")
                     sql += ' NULL'
 
@@ -83,16 +87,16 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
                 sql += ' AUTO_INCREMENT'
 
             # TODO add COMMENT, COLUMN_FORMAT, STORAGE support
-            for ct in col.constraints:
+            for cst in col.constraints:
                 constraint_sql += _generate_base_constraints(
-                    table, [col], ct)
+                    table, [col], cst)
 
         # FIXME add clustered index table constraint checking
 
-        for ct in table.constraints:
-            assert isinstance(ct, Constraint)
+        for cst in table.constraints:
+            assert isinstance(cst, Constraint)
             constraint_sql += _generate_base_constraints(
-                table, ct.get_columns_by_names(table), ct)
+                table, cst.get_columns_by_names(table), cst)
 
         sql += constraint_sql + '\n)'
 
@@ -104,7 +108,7 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
         # foreign key support.
         sql += ' ENGINE=INNODB;\n'
 
-        return [self._header(table), sql]
+        return [ self._header(table), sql ]
 
     def _generate_base_view(self, view):
         """
