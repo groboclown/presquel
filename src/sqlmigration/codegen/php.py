@@ -759,6 +759,7 @@ class PhpLanguageGenerator(LanguageGenerator):
                 '        $ret = $this->createReturn($stmt, function ($s) {',
                 '            return true;',
                 '        });',
+                '        return $ret;',
                 '    }', ''
             ])
 
