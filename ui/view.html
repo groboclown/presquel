@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="view.css" />
+    <link rel="stylesheet" href="joint-0.9.0.min.css" />
+    <script src="joint-0.9.0.min.js"></script>
+    <script src="joint.layout.DirectedGraph.min.js"></script>
+    <script src="joint.shapes.devs.min.js"></script>
+    <script lang="javascript">
+
+
+ForeignKey = joint.dia.Link.extend({
+    defaults: {
+        type: 'schema.ForeignKey',
+        attrs: {
+            '.marker-target': { d: 'M 10 0 L 0 5 L 10 10 z', fill: 'black', stroke: 'black' },
+        }
+    }
+});
+
+
+
+
+function importfile(graph, filename) {
+    $.get(filename, function (dom) {
+        var tables = {};
+        var columns = {};
+        var edges = [];
+        var everything = [];
+        var count = 0;
+        
+        $(dom).find('table').each(function() {
+            var el;
+            var $cel = $(this);
+            console.log("cell " + $cel.attr("id"));
+            var column_names = [];
+            $cel.find('column').each(function() {
+                var $col = $(this);
+                var name = $col.attr("name");
+                // map the column id to the table id
+                columns[String($col.attr("id"))] = String($cel.attr("id"));
+                column_names.push($col.attr("name"));
+            });
+            el = new joint.shapes.basic.Rect({
+                position: { x: ((count % 10) * 60), y: ((count / 10) * 100) },
+                size: { width: 60, height: 100 },
+                attrs: {
+                    rect: {
+                        fill: 'blue'
+                    },
+                    text: {
+                        text: $cel.attr("name") + '\n' + column_names.join('\n'),
+                        fill: 'white'
+                    }
+                }
+                //,
+                //name: $cel.attr("name"),
+                //columns: column_names
+            });
+            everything[everything.length] = el;
+            tables[String($cel.attr("id"))] = el;
+            count++;
+        });
+        $(dom).find('edge').each(function() {
+            var $cel = $(this);
+            var src_id = String($cel.attr("source"));
+            var target_id = String($cel.attr("target"));
+            if (!! columns[src_id] && !! columns[target_id]) {
+                var src_table_el = tables[columns[src_id]];
+                var target_table_el = tables[columns[target_id]];
+                var el = new ForeignKey({
+                    // Should reference columns, but for now
+                    source: { id: src_table_el },
+                    target: { id: target_table_el }
+                });
+                everything.push(el);
+            } else {
+                console.log(String($cel.attr("id"))+": could not find reference to both "+src_id+" and "+target_id);
+            }
+        });
+        graph.addCells(everything);
+    });
+}
+
+$(document).ready(function () {
+    var graph = new joint.dia.Graph;
+    var paper = new joint.dia.Paper({
+        el: $('#graph'),
+        width: '100%',
+        height: '40em',
+        model: graph,
+        gridSize: 10
+    });
+    
+    
+    
+    graph.on('change:position', function(cell) {
+        if (!! cell.type && cell.type !== 'schema.Table') {
+            // don't allow edges and columns to be moved
+            cell.set('position', cell.previous('position'));
+        }
+    });
+    
+    
+    // Hard-coded name.  see genGraphXml.py
+    importfile(graph, 'schema.graph.xml');
+    
+    // layout the boxes
+    //joint.layout.DirectedGraph.layout(graph, { setLinkVerticies: false });
+});
+    </script>
+</head>
+<body>
+<div id="graph">
+</div>
+</body>
+</html>
