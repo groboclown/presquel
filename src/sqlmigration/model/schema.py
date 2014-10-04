@@ -135,13 +135,15 @@ class Constraint(SchemaObject):
         :return: list of columns in the parent_schema that match the
             column_names.  The column_names order will be maintained.
         """
-        assert (isinstance(parent_schema, Table) or
-                isinstance(parent_schema, View))
+        assert isinstance(parent_schema, ColumnarSchemaObject)
         ret = []
-        for cn in self.column_names:
-            for col in parent_schema.columns:
-                if col.name == cn:
-                    ret.append(col)
+        for name in self.column_names:
+            col = parent_schema.get_column_named(name)
+            if col is not None:
+                ret.append(col)
+            else:
+                raise Exception("unkown column " + name + " referenced in " +
+                                parent_schema.name)
         return ret
 
 
@@ -418,6 +420,12 @@ class ColumnarSchemaObject(SchemaObject):
         ret = list(self.columns)
         ret.extend(self.constraints)
         return ret
+
+    def get_column_named(self, name):
+        for col in self.columns:
+            if col.name == name:
+                return col
+        return None
 
 
 class Table(ColumnarSchemaObject):

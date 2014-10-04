@@ -52,3 +52,14 @@ docs/_build/
 
 # PyBuilder
 target/
+
+# IntelliJ
+.idea
+*.iml
+
+# Eclipse
+.project
+.pydevproject
+
+# Example generated files
+exports/

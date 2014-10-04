@@ -4,7 +4,7 @@ Base classes used for the generation of code based on the model objects.
 
 from ..model.base import (SqlString, SqlSet)
 from ..model.schema import (View, Table, Constraint, NamedConstraint,
-    SqlConstraint, LanguageConstraint, ValueTypeValue)
+    SqlConstraint, LanguageConstraint, ValueTypeValue, ColumnarSchemaObject)
 from .base import (SchemaScriptGenerator)
 import time
 
@@ -61,6 +61,8 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
         sql += _parse_name(table.table_name)
         # Tablespace used?
 
+        input_validations = []
+
         sql += ' (\n'
         first = True
         for col in table.columns:
@@ -73,6 +75,9 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
                 col.value_type)
 
             for cst in col.constraints:
+                if (isinstance(cst, SqlConstraint) and
+                        cst.constraint_type == 'inputvalidation'):
+                    input_validations.append(cst)
                 if cst.constraint_type == 'notnull':
                     sql += ' NOT NULL'
                 elif (cst.constraint_type == 'nullable' or
@@ -95,8 +100,12 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
 
         for cst in table.constraints:
             assert isinstance(cst, Constraint)
-            constraint_sql += _generate_base_constraints(
-                table, cst.get_columns_by_names(table), cst)
+            if (isinstance(cst, SqlConstraint) and
+                    cst.constraint_type == 'inputvalidation'):
+                input_validations.append(cst)
+            else:
+                constraint_sql += _generate_base_constraints(
+                    table, cst.get_columns_by_names(table), cst)
 
         sql += constraint_sql + '\n)'
 
@@ -107,6 +116,9 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
         # FIXME make this selectable.  For now, we'll hard-code it for the
         # foreign key support.
         sql += ' ENGINE=INNODB;\n'
+
+        if len(input_validations) > 0:
+            sql += _generate_validation_triggers(table, input_validations)
 
         return [ self._header(table), sql ]
 
@@ -169,6 +181,9 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
         :param table:
         :return: list(str)
         """
+
+        # FIXME include dropping then recreating the triggers.
+
         raise Exception("not implemented")
 
     def _generate_upgrade_view(self, view):
@@ -391,3 +406,37 @@ def _generate_base_constraints(table, columns, ct):
             # We allow other constraint types, because those could be used
             # by other databases or tools.
     return constraint_sql
+
+
+def _generate_validation_triggers(table, csts):
+    assert isinstance(table, ColumnarSchemaObject)
+    assert len(csts) > 0
+
+    checks = ""
+    for cst in csts:
+        assert isinstance(cst, SqlConstraint)
+        msg = 'Input validation failed'
+        if 'message' in cst.details:
+            msg = cst.details['message']
+        sset = cst.sql
+        assert isinstance(sset, SqlSet)
+        checks += ('    IF NOT (' + sset.get_for_platform(PLATFORMS).sql +
+                ') THEN\n' +
+                "        CALL ErrorMsg ('" + msg + "');\n"
+                'END IF;\n')
+
+    sql = ('delimiter //\n' +
+         'CREATE TRIGGER insert_validation_' + table.name +
+         '\n        BEFORE INSERT ON ' + table.name +
+         '\n        FOR EACH ROW' +
+         '\nBEGIN\n' + checks +
+         'END; //\n' +
+         'CREATE TRIGGER update_validation_' + table.name +
+         '\n        BEFORE INSERT ON ' + table.name +
+         '\n        FOR EACH ROW' +
+         '\nBEGIN\n' + checks +
+         'END; //' +
+         '\ndelimiter ;')
+
+    return sql
+

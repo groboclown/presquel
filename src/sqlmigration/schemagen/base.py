@@ -2,8 +2,8 @@
 Base classes used for the generation of code based on the model objects.
 """
 
-from ..model import (SchemaObject, View, Table, Change, Sequence, Procedure,
-                     SqlChange)
+from ..model.schema import (SchemaObject, View, Table, Sequence, Procedure)
+from ..model.change import (Change, SqlChange)
 
 
 class SchemaScriptGenerator(object):
@@ -23,7 +23,7 @@ class SchemaScriptGenerator(object):
         :param platforms:
         :return: boolean
         """
-        raise Exception("Not implemented")
+        raise NotImplementedError("not implemented")
 
     def generate_base(self, top_object):
         """
@@ -37,7 +37,8 @@ class SchemaScriptGenerator(object):
             # Nothing to do for the generation of the base schema with
             # a change
             return []
-        raise Exception("Cannot generate schema with " + str(top_object))
+        else:
+            raise Exception("Cannot generate schema with " + str(top_object))
 
     def generate_upgrade(self, top_object):
         """
@@ -97,7 +98,7 @@ class SchemaScriptGenerator(object):
         :param table:
         :return: list(str)
         """
-        raise Exception("not implemented")
+        raise NotImplementedError("not implemented")
 
     def _generate_base_view(self, view):
         """
@@ -106,7 +107,7 @@ class SchemaScriptGenerator(object):
         :param view:
         :return: list(str)
         """
-        raise Exception("not implemented")
+        raise NotImplementedError("not implemented")
 
     def _generate_base_sequence(self, sequence):
         """
@@ -115,7 +116,7 @@ class SchemaScriptGenerator(object):
         :param sequence:
         :return: list(str)
         """
-        raise Exception("not implemented")
+        raise NotImplementedError("not implemented")
 
     def _generate_base_procedure(self, procedure):
         """
@@ -124,7 +125,7 @@ class SchemaScriptGenerator(object):
         :param procedure:
         :return: list(str)
         """
-        raise Exception("not implemented")
+        raise NotImplementedError("not implemented")
 
     def _generate_upgrade_sqlchange(self, sql_change):
         """
@@ -148,7 +149,7 @@ class SchemaScriptGenerator(object):
         :param table:
         :return: list(str)
         """
-        raise Exception("not implemented")
+        raise NotImplementedError("not implemented")
 
     def _generate_upgrade_view(self, view):
         """
@@ -157,7 +158,7 @@ class SchemaScriptGenerator(object):
         :param view:
         :return: list(str)
         """
-        raise Exception("not implemented")
+        raise NotImplementedError("not implemented")
 
     def _generate_upgrade_sequence(self, sequence):
         """
@@ -166,7 +167,7 @@ class SchemaScriptGenerator(object):
         :param sequence:
         :return: list(str)
         """
-        raise Exception("not implemented")
+        raise NotImplementedError("not implemented")
 
     def _generate_upgrade_procedure(self, procedure):
         """
@@ -175,4 +176,4 @@ class SchemaScriptGenerator(object):
         :param procedure:
         :return: list(str)
         """
-        raise Exception("not implemented")
+        raise NotImplementedError("not implemented")

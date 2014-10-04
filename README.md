@@ -4,9 +4,27 @@ presquel
 This tool allows for automation around version controlled changes to a database
 schema, as well as controlling the software API interaction with the database.
 
-With it, you can describe the current state of the database schema, and
-insert into that description the operations necessary to migrate from the
-previous version to the current state.
+This keeps all the information regarding the database as centralized as
+possible, allows for the database architects to have better control over:
+
+* defining the database structure, with database server peculiarities maintained
+  in the same file;
+* controls how developers can interact with the database through the software;
+* migrating the database between versions.
+
+
+## Who's It For
+
+Presquel is developed for projects that have a database schema as a product,
+but can require packaging an upgrade to update the database schema and data.
+
+If the product requires supporting multiple database vendors, then Presquel can
+manage the peculiarities of each, and even help provide a single software API
+by generating the boilerplate database software interface for each database
+type.
+
+
+## How It Helps
 
 Keeping the state visible at the "head" revision for each version means that
 it's easier to deal with messy versioning.  Traditional sql migration tools
