@@ -1,8 +1,8 @@
 #!/usr/bin/python3
 
 import sys
-from sqlmigration import parse_versions
-from sqlmigration.codegen import (AnalysisModel, filegen, php, mysql)
+from presquel import parse_versions
+from presquel.codegen import (AnalysisModel, filegen, php, mysql)
 
 parent_class = None
 namespace = None

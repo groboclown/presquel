@@ -2,21 +2,21 @@
 
 import os
 import sys
-import sqlmigration
+import presquel
 import distutils.dir_util
 
 
 
 if __name__ == '__main__':
     output_dir = sys.argv[1]
-    analysis = sqlmigration.codegen.AnalysisModel()
+    analysis = presquel.codegen.AnalysisModel()
     for in_dir in sys.argv[2:]:
-        versions = sqlmigration.parse_versions(in_dir)
+        versions = presquel.parse_versions(in_dir)
         #if len(versions) <= 0:
         #    raise Exception("no versions found")
         analysis.add_version(os.path.dirname(in_dir), versions[0])
     
-    xml = sqlmigration.codegen.generate_graph_xml(analysis)
+    xml = presquel.codegen.generate_graph_xml(analysis)
     
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)

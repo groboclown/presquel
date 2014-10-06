@@ -2,12 +2,12 @@
 
 import os
 import sys
-import sqlmigration
+import presquel
 
 
 def find_max_order_len(max_len, schema_list):
     for sch in schema_list:
-        if not isinstance(sch, sqlmigration.model.SchemaObject):
+        if not isinstance(sch, presquel.model.SchemaObject):
             raise Exception("expected SchemaObject, found " + repr(sch)) 
         ord_len = len(str(sch.order.items()[0]))
         if ord_len > max_len:
@@ -19,7 +19,7 @@ def find_max_order_len(max_len, schema_list):
 if __name__ == '__main__':
     (platform, indir, outdir) = sys.argv[1:]
 
-    gens = sqlmigration.get_generator(platform)
+    gens = presquel.get_generator(platform)
     if len(gens) <= 0:
         raise Exception("No generator found for " + platform)
     gen = gens[0]
@@ -27,7 +27,7 @@ if __name__ == '__main__':
     if not os.path.isdir(outdir):
         os.mkdir(outdir)
 
-    versions = sqlmigration.parse_versions(indir)
+    versions = presquel.parse_versions(indir)
     if len(versions) <= 0:
         raise Exception("no versions found")
 

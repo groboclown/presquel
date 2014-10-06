@@ -8,8 +8,6 @@ Tools to help in the generation of PHP source files.
 # end up being used.
 
 
-
-
 from .filegen import (LanguageGenerator, GenConfig)
 from .converter import (PrepSqlConverter)
 from .analysis import (ColumnAnalysis)
@@ -543,7 +541,7 @@ class PhpLanguageGenerator(LanguageGenerator):
         #        if code is not None:
         #            ret.append(code)
         #        for arg in wr.get_sql_arguments(True):
-        #            assert isinstance(arg, sqlmigration.model.SqlArgument)
+        #            assert isinstance(arg, presquel.model.SqlArgument)
         #            data_values.append('            \'' + arg.name +
         #                '\' => $' + arg.name + ',')
         #        ret.append('        $where .= \' AND ' + wr.get_sql_value(True) +
