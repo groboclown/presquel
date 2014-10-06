@@ -307,18 +307,8 @@ that.
 
 ## TODO
 
-This is still an early-development tool.  Here's the current todo list.
-
-* Add code generation automatic method creation for any index (table or column).
- These exist for the read methods, but should be added for update and delete.
-* Ensure the Dewey Decimal versioning system works as expected.
-* Add version info files to indicate previous version.
-* Add change syntax support.
-* Add change sql generation.
-* Add the version copy tool.
-* Add XML and JSon parsers.  These should be nearly trivial to add.
-* Complete this documentation.
-* Add support for postgres, oracle, and sql server.
+This is still an early-development tool.  There's stil lots of work to be
+done.  See the [TODO list](TODO.md) for details.
 
 
 ## Syntax
