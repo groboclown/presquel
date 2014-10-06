@@ -63,3 +63,4 @@ target/
 
 # Example generated files
 exports/
+site.conf.php

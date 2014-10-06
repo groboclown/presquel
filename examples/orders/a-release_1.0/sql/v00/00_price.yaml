@@ -34,4 +34,4 @@ table:
           dialects:
           - dialect:
               platforms: all
-              sql: "Price >= 0.0"
+              sql: "{Price} >= 0.0"
