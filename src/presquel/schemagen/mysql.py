@@ -420,10 +420,15 @@ def _generate_validation_triggers(table, csts):
             msg = cst.details['message']
         sset = cst.sql
         assert isinstance(sset, SqlSet)
-        checks += ('    IF NOT (' + sset.get_for_platform(PLATFORMS).sql +
+        sval = sset.get_for_platform(PLATFORMS).sql
+
+        for col in table.columns:
+            sval = sval.replace('{' + col.name + '}', 'NEW.' + col.name)
+
+        checks += ('    IF NOT (' + sval +
                 ') THEN\n' +
                 "        CALL ErrorMsg ('" + msg + "');\n"
-                'END IF;\n')
+                '    END IF;\n')
 
     sql = ('delimiter //\n' +
          'CREATE TRIGGER insert_validation_' + table.name +
@@ -432,7 +437,7 @@ def _generate_validation_triggers(table, csts):
          '\nBEGIN\n' + checks +
          'END; //\n' +
          'CREATE TRIGGER update_validation_' + table.name +
-         '\n        BEFORE INSERT ON ' + table.name +
+         '\n        BEFORE UPDATE ON ' + table.name +
          '\n        FOR EACH ROW' +
          '\nBEGIN\n' + checks +
          'END; //' +
