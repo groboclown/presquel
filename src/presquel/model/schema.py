@@ -8,11 +8,14 @@ from .base import (BaseObject, TABLE_TYPE, COLUMN_TYPE, VIEW_TYPE,
 
 
 class SchemaObject(BaseObject):
-    def __init__(self, name, order, comment, object_type, changes):
+    """Generic parent for all schema definition objects."""
+    def __init__(self, name, order, comment, object_type, changes,
+                 full_name = None):
         BaseObject.__init__(self, order, comment, object_type)
         self.__object_type = object_type
         self.__changes = changes or []
         self.__name = name
+        self.__full_name = full_name or name
 
         # One time setting of the parent
         for ch in self.__changes:
@@ -20,7 +23,13 @@ class SchemaObject(BaseObject):
 
     @property
     def name(self):
+        """Simple name for the object."""
         return self.__name
+
+    @property
+    def full_name(self):
+        """Full, unique name for this object.  May be the same as name."""
+        return self.__full_name
 
     @property
     def changes(self):
@@ -45,7 +54,17 @@ class SchemaObject(BaseObject):
 
     @property
     def constraints(self):
+        """
+        :return: a list of Constraint objects.
+        """
         return []
+
+    @staticmethod
+    def create_full_name(*parts):
+        """
+        Creates a full name from a set of name parts
+        """
+        return ".".join(parts)
 
 
 class ValueTypeValue(object):
@@ -96,15 +115,50 @@ class ValueTypeValue(object):
             code, False if the value is self-contained.
         """
         return (self.__computed_value is not None and
-            len(self.__computed_value.arguments) > 0)
+                len(self.__computed_value.arguments) > 0)
+
+
+"""CONSTRAINT_TYPES: All recognized constraint types."""
+CONSTRAINT_TYPES = (
+    'key',
+    'primarykey',
+    'fulltextkey',
+    'uniquekey',
+    'spatialkey',
+    'foreignkey',
+    'uniqueindex',
+    'index',
+    'primaryindex',
+    'fulltextindex',
+    'spatialindex',
+    'codeindex',  # index recognized by the code, not the schema
+    'initialvalue',
+    'noupdate',
+    'notread',
+    'constantquery',
+    'constantupdate', 'updatevalue',  # synonyms
+    'restrictquery',
+    'validateread',
+    'notnull',
+    'validatewrite', 'validate',  # synonyms
+    'valuerestriction',
+    'createrestriction',
+    'updaterestriction',
+    'updaterequired', 'requiredupdate',  # synonyms
+)
 
 
 class Constraint(SchemaObject):
+    """
+    A generic limitation on the schema object.  These can be SQL or code based.
+    """
     def __init__(self, order, comment, constraint_type, column_names, details,
                  changes):
         SchemaObject.__init__(self, constraint_type, order, comment,
                               CONSTRAINT_TYPE, changes)
         assert isinstance(constraint_type, str)
+        if constraint_type not in CONSTRAINT_TYPES:
+            raise Exception("invalid constraint type " + str(constraint_type))
         self.__constraint_type = _strip_keys(constraint_type)
         details = details or {}
         assert isinstance(details, dict)
@@ -148,6 +202,9 @@ class Constraint(SchemaObject):
 
 
 class SqlConstraint(Constraint):
+    """
+    A constraint that lives in SQL.
+    """
     def __init__(self, order, comment, constraint_type, column_names, details,
                  sql_set, changes):
         Constraint.__init__(self, order, comment, constraint_type, column_names,
@@ -196,6 +253,9 @@ class NamedConstraint(Constraint):
 
 
 class Column(SchemaObject):
+    """
+    A SQL column definition.
+    """
     def __init__(self, order, comment, name, value_type, value, default_value,
                  auto_increment, remarks, before_column, after_column, position,
                  constraints, changes):
@@ -367,7 +427,6 @@ class ExtendedSql(object):
         return self.post_sql.sql_args(platforms, arg_converter)
 
 
-
 class ColumnarSchemaObject(SchemaObject):
     """
     A schema type that has columns.  This includes tables, views, and stored
@@ -376,8 +435,10 @@ class ColumnarSchemaObject(SchemaObject):
     def __init__(self, order, comment, catalog_name, schema_name, name,
                  columns, top_constraints, object_type, changes,
                  where_clauses, extended_sql):
-        SchemaObject.__init__(self, name, order, comment, object_type,
-                              changes)
+        SchemaObject.__init__(
+            self, name, order, comment, object_type,
+            changes, SchemaObject.create_full_name(
+                catalog_name, schema_name, name))
         self.__catalog_name = catalog_name
         self.__schema_name = schema_name
         self.__columns = columns
