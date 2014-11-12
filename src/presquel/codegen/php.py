@@ -1275,7 +1275,7 @@ class PhpLanguageGenerator(LanguageGenerator):
         lpp = dty.find('(')
         if lpp >= 0:
             dty = dty[:lpp]
-        dty = dty.trim()
+        dty = dty.strip()
         if dty in ['INT', 'INTEGER', 'SMALLINT', 'TINYINT', 'MEDIUMINT',
                    'BIGINT', 'BIT']:
             # integer type
