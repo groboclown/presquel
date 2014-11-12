@@ -64,7 +64,7 @@ class SchemaObject(BaseObject):
         """
         Creates a full name from a set of name parts
         """
-        return ".".join(parts)
+        return ".".join([ (prt is None and "" or prt) for prt in parts ])
 
 
 class ValueTypeValue(object):
