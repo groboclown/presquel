@@ -101,7 +101,8 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
         for cst in table.constraints:
             assert isinstance(cst, Constraint)
             if (isinstance(cst, SqlConstraint) and
-                    cst.constraint_type == 'inputvalidation'):
+                    cst.constraint_type in [
+                        'valuerestriction', 'validatewrite', 'validate']):
                 input_validations.append(cst)
             else:
                 constraint_sql += _generate_base_constraints(
@@ -242,7 +243,10 @@ def _escape_value_type_value(vtv):
 
 
 def _parse_value_type(value_type):
-    return value_type.strip().upper()
+    val = value_type.strip().upper()
+    if val in ['BOOL', 'BOOLEAN']:
+        val = 'TINYINT'
+    return val
 
 
 def _parse_name(name):

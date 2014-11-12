@@ -530,7 +530,7 @@ class CreateQuery(UpdateCreateQuery):
             values = column.create_restrictions
         else:
             # Can be None
-            values = [ column.create_value ]
+            values = [column.create_value]
             # Default values are value types, which are specified in the dbs.
             if column.default_value is not None:
                 is_required = False

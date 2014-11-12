@@ -35,19 +35,19 @@ class Order(object):
 
     def __lt__(self, other):
         assert isinstance(other, Order)
-        return self -other < 0
+        return self - other < 0
 
     def __le__(self, other):
         assert isinstance(other, Order)
-        return self -other <= 0
+        return self - other <= 0
 
     def __gt__(self, other):
         assert isinstance(other, Order)
-        return self -other > 0
+        return self - other > 0
 
     def __ge__(self, other):
         assert isinstance(other, Order)
-        return self -other >= 0
+        return self - other >= 0
 
 
 class BaseObject(object):
@@ -261,7 +261,7 @@ class LanguageSet(object):
             assert isinstance(name, str)
             assert isinstance(code, str)
             name = name.strip().lower()
-            assert name not  in langs
+            assert name not in langs
             langs[name] = code
 
         if arguments is None:
@@ -294,7 +294,6 @@ class LanguageSet(object):
         :return a tuple of LanguageArgument
         """
         return self.__arguments
-
 
 
 COLUMN_TYPE = SchemaObjectType('column')

@@ -126,7 +126,6 @@ class PrepSqlConverter(object):
         return self._generate_code_for_collection_arguments(output_variable,
             sql_set, sql_bits)
 
-
     def _generate_sql_for_sql_set(self, sql_set):
         """
         Generates the SQL for a SqlSet

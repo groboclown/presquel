@@ -1,4 +1,6 @@
-# !/usr/bin/python3
+"""
+Classes that add an additional layer of analysis upon the schema model.
+"""
 
 from ..model.version import (SchemaVersion)
 from ..model.base import (SqlArgument)
@@ -8,6 +10,7 @@ from ..model.schema import (SchemaObject, Column, Table, View, Constraint,
 
 class AnalysisModel(object):
     """
+    Top-level schema analysis parser and container.
 
     All parsing is done in this class and its subclasses.
     """
@@ -20,15 +23,23 @@ class AnalysisModel(object):
         self.__schema_analysis = {}
 
     def add_version(self, package_name, schema_version):
+        """
+        Add a new schema version to this model.  This should not contain
+        multiple versions of the same schema, but rather a single version of
+        multiple schemas.
+
+        :param package_name:
+        :param schema_version: SchemaVersion
+        :return:
+        """
         assert isinstance(schema_version, SchemaVersion)
         for schema in schema_version.schema:
             assert isinstance(schema, SchemaObject)
-            if hasattr(schema, 'name'):
-                name = schema.name
-                if name in self.__schema_by_name:
-                    raise Exception("already registered schema with name " +
-                                    name)
-                self.__schema_by_name[name] = schema
+            name = schema.full_name
+            if name in self.__schema_by_name:
+                raise Exception("already registered schema with name " +
+                                name)
+            self.__schema_by_name[name] = schema
             self.__schemas.append(schema)
             self.__schema_packages[schema] = package_name
             self.__schema_analysis[schema] = self._process_schema(schema)
@@ -259,20 +270,6 @@ class ColumnSetAnalysis(SchemaAnalysis):
 
         return ret
 
-    def get_read_validations(self):
-        """
-
-        :return: list of pairs: (column, validation constraint).  If it
-            comes from a top-level constraint, the column is None.
-        """
-        ret = []
-        for v in self.top_read_validations:
-            ret.append([None, v])
-        for c in self.columns_analysis:
-            for v in c.read_validations:
-                ret.append([c.schema, v])
-        return ret
-
     def get_write_validations(self):
         """
 
@@ -285,18 +282,6 @@ class ColumnSetAnalysis(SchemaAnalysis):
         for c in self.columns_analysis:
             for v in c.write_validations:
                 ret.append([c.schema, v])
-        return ret
-
-    @property
-    def top_read_validations(self):
-        """
-
-        :return: list of all top-level validations for read operations
-        """
-        ret = []
-        c = self.top_analysis
-        assert isinstance(c, TopAnalysis)
-        ret.extend(c.read_validations)
         return ret
 
     @property
@@ -411,7 +396,6 @@ class ColumnAnalysis(SchemaAnalysis):
         # By default, every column allows null unless you explicitly turn it off
         self.is_nullable = True
         self.query_restrictions = []
-        self.read_validations = []
         self.write_validations = []
         self.__constraints_analysis = []
 
@@ -445,8 +429,6 @@ class ColumnAnalysis(SchemaAnalysis):
                 self.update_value = c
             elif c.constraint.constraint_type == 'restrictquery':
                 self.query_restrictions.append(c)
-            elif c.constraint.constraint_type == 'validateread':
-                self.read_validations.append(c)
             elif c.constraint.constraint_type == 'notnull':
                 self.is_nullable = False
             elif c.constraint.constraint_type in ['validatewrite', 'validate']:
@@ -496,7 +478,7 @@ class ColumnAnalysis(SchemaAnalysis):
     def update_arguments(self):
         """
 
-        :return:
+        :return: list of arguments
         """
         if self.is_read_only:
             return []
@@ -521,7 +503,6 @@ class TopAnalysis(SchemaAnalysis):
 
         self.is_read_only = is_read_only
         self.__constraints_analysis = []
-        self.read_validations = []
         self.write_validations = []
         self.primary_key_constraint = None
 
@@ -546,11 +527,8 @@ class TopAnalysis(SchemaAnalysis):
                         self.unique_or_primary_sets.append(c)
                     elif c.constraint.constraint_type.count('unique') > 0:
                         self.unique_or_primary_sets.append(c)
-            elif c.constraint.constraint_type == 'validateread':
-                self.read_validations.append(c)
             elif c.constraint.constraint_type in ['validatewrite', 'validate']:
                 self.write_validations.append(c)
-
 
 
 class AbstractProcessedConstraint(SchemaAnalysis):

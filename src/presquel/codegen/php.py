@@ -12,9 +12,10 @@ from .filegen import (LanguageGenerator, GenConfig)
 from .converter import (PrepSqlConverter)
 from .analysis import (ColumnAnalysis)
 from .sql import (ReadQueryData, CreateQuery, UpdateQuery, InputValue)
-from ..model.schema import (WhereClause, ExtendedSql, SqlConstraint)
+from ..model.schema import (WhereClause, ExtendedSql, SqlConstraint, Column)
 from ..model.base import (SqlArgument, SqlSet, LanguageSet)
 import time
+
 
 def escape_php_string(php_str):
     """
@@ -22,7 +23,6 @@ def escape_php_string(php_str):
     :parameter php_str: the text, as a string
     :return: escaped text, ready for insertion into a PHP string.
     """
-
     return (php_str.
             replace('\\', '\\\\').
             replace("'", "\\'").
@@ -55,7 +55,6 @@ def generate_php_name(schema_name):
     return ret
 
 
-
 class PhpGenConfig(GenConfig):
     """
     A PHP specific configuration.  It will automatically setup many computed
@@ -74,7 +73,6 @@ class PhpGenConfig(GenConfig):
         self.parent_class = parent_class
         self.sql_name = analysis_obj.sql_name
         self.class_name = generate_php_name(self.sql_name)
-
 
     def validate(self):
         GenConfig.validate(self)
@@ -101,8 +99,7 @@ class PhpLanguageGenerator(LanguageGenerator):
         uses = ''
         if config.parent_class.count('\\') > 0:
             uses = ('use ' +
-                config.parent_class[0: config.parent_class.find('\\')] +
-                ';')
+                config.parent_class[0: config.parent_class.find('\\')] + ';')
 
         ret = [
             '<?php',
@@ -228,7 +225,7 @@ class PhpLanguageGenerator(LanguageGenerator):
             '        $data = array();',
         ])
         ret.extend(PhpLanguageGenerator._generate_where_clause(
-               config.analysis_obj, False))
+            config.analysis_obj, False))
         ret.extend(self._generate_sql())
         ret.extend([
             '        return $this->createReturn($stmt, function ($s) {',
@@ -249,7 +246,8 @@ class PhpLanguageGenerator(LanguageGenerator):
         ret.append('        $sql = \'' + escaped_sql + '\';')
         if len(arg_names) > 0:
             ret.append('        $data = array(')
-            # Notice how this skips the use of arg_names, and recreates those values
+            # Notice how this skips the use of arg_names, and recreates those
+            # values
             for a in read_data.arguments:
                 ret.append('            \'' + a + '\' => $' + a + ',')
             ret.append('        );')
@@ -281,29 +279,25 @@ class PhpLanguageGenerator(LanguageGenerator):
             '        }'
         ])
         ret.extend(self._generate_sql())
-        ret.append('        return $this->createReturn($stmt, function ($s) {')
-        if len(config.analysis_obj.get_read_validations()) > 0:
-            # TODO add the invalid rows to a "invalidrows" array in the return
-            # structure.
-            ret.extend([
-                '            $rows = array();',
-                '            foreach ($s->fetchAll() as $row) {',
-                '                if (!$this->validateRead($row)) {',
-                '                    return null;',
-                '                }',
-                '                $rows[] = $row;',
-                '            }',
-                '            return $rows;'
-            ])
-        else:
-            ret.extend([
-                '            return $s->fetchAll();',
-            ])
         ret.extend([
+            '        return $this->createReturn($stmt, function ($s) {',
+            '            $rows = $s->fetchAll();'
+        ])
+        replace_cols = []
+        for col in config.analysis_obj.columns_analysis:
+            assert isinstance(col, ColumnAnalysis)
+            extract = PhpLanguageGenerator._convert_to_php_type(col.schema)
+            if extract is not None:
+                replace_cols.append('                ' + extract)
+        if len(replace_cols) > 0:
+            ret.append('            foreach ($rows as &$row) {')
+            ret.extend(replace_cols)
+            ret.append('            }')
+        ret.extend([
+            '            return $rows;',
             '        });',
             '    }', '',
         ])
-
 
         # NOTE: no where clause object support for the "any"
         ret.extend([
@@ -342,8 +336,9 @@ class PhpLanguageGenerator(LanguageGenerator):
             '',
         ])
 
-        for readby_columns in config.analysis_obj.get_selectable_column_lists():
-            assert len(readby_columns) > 0
+        for read_by_columns in config.analysis_obj. \
+                get_selectable_column_lists():
+            assert len(read_by_columns) > 0
 
             # TODO if the read-by is a primary key or unique key, then the
             # order MUST NOT be part of the query, and even the start/end should
@@ -354,7 +349,7 @@ class PhpLanguageGenerator(LanguageGenerator):
             # the table name as part of the column name.
 
             read_by_analysis = [config.analysis_obj.get_column_analysis(c)
-                                for c in readby_columns]
+                                for c in read_by_columns]
             read_by_names = [c.sql_name for c in read_by_analysis]
 
             title = '_x_'.join(read_by_names)
@@ -414,30 +409,25 @@ class PhpLanguageGenerator(LanguageGenerator):
                 '        }'
             ])
             ret.extend(self._generate_sql())
-            ret.append(
-                '        return $this->createReturn($stmt, function ($s) {')
-
-            if len(config.analysis_obj.get_read_validations()) > 0:
-                ret.extend([
-                    '            $rows = array();',
-                    '            foreach ($s->fetchAll() as $row) {',
-                    '                if (!$this->validateRead($row)) {',
-                    '                    return null;',
-                    '                }',
-                    '                $rows[] = $row;',
-                    '            }',
-                    '            return $rows',
-                ])
-            else:
-                ret.extend([
-                    '            return $s->fetchAll();',
-                ])
-
             ret.extend([
+                '        return $this->createReturn($stmt, function ($s) {',
+                '            $rows = $s->fetchAll();'
+            ])
+            replace_cols = []
+            for col in config.analysis_obj.columns_analysis:
+                assert isinstance(col, ColumnAnalysis)
+                extract = PhpLanguageGenerator._convert_to_php_type(col.schema)
+                if extract is not None:
+                    replace_cols.append('                ' + extract)
+            if len(replace_cols) > 0:
+                ret.append('            foreach ($rows as &$row) {')
+                ret.extend(replace_cols)
+                ret.append('            }')
+            ret.extend([
+                '            return $rows;',
                 '        });',
                 '    }', '',
             ])
-
         return ret
 
     def generate_create(self, config):
@@ -511,10 +501,11 @@ class PhpLanguageGenerator(LanguageGenerator):
             php_code, sql_key, sql_value = PhpLanguageGenerator._convert_arg(
                 config, arg, False)
             if php_code is not None or sql_key is not None:
-                ret.extend(['        } else {'
+                ret.extend([
+                    '        } else {',
                     '            $columns[] = "' +
                         escape_php_string(arg.column_name) + '";'
-                    ])
+                ])
                 if php_code is not None:
                     ret.extend(php_code)
                     ret.append('            $values[] = $tmpSql;')
@@ -529,8 +520,8 @@ class PhpLanguageGenerator(LanguageGenerator):
 
             ret.append('        }')
 
-        # FIXME This "where" doesn't really work right, and it doesn't look like it
-        # will ever really work right (for MySql anyway).
+        # FIXME This "where" doesn't really work right, and it doesn't look
+        # like it will ever really work right (for MySql anyway).
         # has_where = len(create.where_values) > 0
         # if has_where:
         #    ret.append('        $where = " FROM ' + analysis_obj.sql_name +
@@ -544,7 +535,8 @@ class PhpLanguageGenerator(LanguageGenerator):
         #            assert isinstance(arg, presquel.model.SqlArgument)
         #            data_values.append('            \'' + arg.name +
         #                '\' => $' + arg.name + ',')
-        #        ret.append('        $where .= \' AND ' + wr.get_sql_value(True) +
+        #        ret.append('        $where .= \' AND ' +
+        #  wr.get_sql_value(True) +
         #                   '\';')
         #        # Also for the optional values....
         # This would change the construction of the insert statement into one
@@ -573,14 +565,12 @@ class PhpLanguageGenerator(LanguageGenerator):
             '    }', ''
         ])
 
-
         # -------------------------------------------------------------------
         # Create the upsert command (insert or update if exists)
         # We should only generate this if:
         #   - there is no autoincrement column
         #   - there is a unique index or primary key
         # We should also generate this for each primary key / unique index.
-
 
         primary_keys = config.analysis_obj.primary_key_columns
         allow_upsert = len(primary_keys) > 0
@@ -712,10 +702,11 @@ class PhpLanguageGenerator(LanguageGenerator):
                 php_code, sql_key, sql_value = (
                     PhpLanguageGenerator._convert_arg(config, arg, False))
                 if php_code is not None or sql_key is not None:
-                    ret.extend(['        } else {'
+                    ret.extend([
+                        '        } else {',
                         '            $columns[] = "' +
                             escape_php_string(arg.column_name) + '";'
-                        ])
+                    ])
 
                     if php_code is not None:
                         ret.extend(php_code)
@@ -1022,6 +1013,8 @@ class PhpLanguageGenerator(LanguageGenerator):
             '        return $this->createReturn($stmt, function ($s) {',
         ])
         if extended_sql.sql_type == 'query':
+            # FIXME when the query contains the known returned rows, the
+            # returned rows should be converted.
             ret.append('            return $s->fetchAll();')
         elif extended_sql.sql_type in ['id', 'count']:
             ret.append('            return intval($s->fetchColumn);')
@@ -1107,11 +1100,6 @@ class PhpLanguageGenerator(LanguageGenerator):
             '    private function validateTable(&$row) {',
             '        $ret = True;',
         ]
-        read_validates = [
-            '',
-            '    private function validateRead(&$row) {',
-            '        $ret = True;',
-        ]
         write_validates = [
             '',
             '    private function validateWrite(&$row) {',
@@ -1130,19 +1118,16 @@ class PhpLanguageGenerator(LanguageGenerator):
         # FIXME --------------------------------------------------------
         # FIXME these comments and what they call need to be redone
 
-        # for v in processed_columns.php_read:
-        #    assert isinstance(v, ProcessedPhpValidationConstraint)
-        #    read_validates.append('        $ret = $this->validate' + v.order_name +
-        #                          '($row) && $ret;')
-        #    ret.extend(generate_validation(v))
         # for v in processed_columns.php_write:
         #    assert isinstance(v, ProcessedPhpValidationConstraint)
-        #    write_validates.append('        $ret = $this->validate' + v.order_name +
+        #    write_validates.append('        $ret = $this->validate' +
+        #  v.order_name +
         #                           '($row) && $ret;')
         #    ret.extend(generate_validation(v))
         # for v in processed_columns.php_validation:
         #    assert isinstance(v, ProcessedPhpValidationConstraint)
-        #    write_validates.append('        $ret = $this->validate' + v.order_name +
+        #    write_validates.append('        $ret = $this->validate' +
+        #  v.order_name +
         #                           '($row) && $ret;')
         #    ret.extend(generate_validation(v))
         #
@@ -1156,15 +1141,10 @@ class PhpLanguageGenerator(LanguageGenerator):
             '        return $this->finalCheck($ret);', '    }',
             ''
         ])
-        read_validates.extend([
-            '        return $this->finalCheck($ret);', '    }',
-            ''
-        ])
         write_validates.extend([
             '        return $this->finalCheck($ret);', '    }',
             ''
         ])
-        ret.extend(read_validates)
         ret.extend(write_validates)
         ret.extend(table_validates)
 
@@ -1275,4 +1255,38 @@ class PhpLanguageGenerator(LanguageGenerator):
                 sql_key = arg.column_name
                 sql_value = config.prep_sql_converter.generate_sql(sql)
 
-        return (php_code, sql_key, sql_value)
+        return php_code, sql_key, sql_value
+
+    @staticmethod
+    def _convert_to_php_type(col):
+        """
+        convert a Column db extracted value into a PHP value.
+
+        :param col: Column type
+        :return: None if no conversion is necessary, otherwise the string
+            conversion
+        """
+        assert isinstance(col, Column)
+
+        rowval = '$row["' + escape_php_string(col.name) + '"]'
+
+        dty = col.data_type.upper()
+        # Strip off any size parameter for the type
+        lpp = dty.find('(')
+        if lpp >= 0:
+            dty = dty[:lpp]
+        dty = dty.trim()
+        if dty in ['INT', 'INTEGER', 'SMALLINT', 'TINYINT', 'MEDIUMINT',
+                   'BIGINT', 'BIT']:
+            # integer type
+            return rowval + ' = intval(' + rowval + ');'
+        if dty in ['BOOL', 'BOOLEAN']:
+            # convert int val to boolean
+            return rowval + ' = intval(' + rowval + ') == 0 ? FALSE : TRUE;'
+        if dty in ['FLOAT', 'DECIMAL', 'NUMERIC', 'DOUBLE', 'CURRENCY']:
+            return rowval + ' = floatval(' + rowval + ');'
+
+        # Strings, enums, blobs, clobs, and dates are all returned as-is
+        return None
+
+

@@ -29,7 +29,7 @@ table:
         
       # SQL trigger for updates on price updates
       - constraint:
-          type: input validation
+          type: value restriction
           message: price must be non-negative
           dialects:
           - dialect:

@@ -256,10 +256,11 @@ class Column(SchemaObject):
     """
     A SQL column definition.
     """
-    def __init__(self, order, comment, name, value_type, value, default_value,
-                 auto_increment, remarks, before_column, after_column, position,
-                 constraints, changes):
+    def __init__(self, order, comment, name, value_type, data_type, value,
+                 default_value, auto_increment, remarks, before_column,
+                 after_column, position, constraints, changes):
         assert value_type is not None
+        assert data_type is not None
         assert value is None or isinstance(value, ValueTypeValue)
         assert default_value is None or isinstance(default_value,
                                                    ValueTypeValue)
@@ -275,6 +276,7 @@ class Column(SchemaObject):
         self.__after_column = after_column
         self.__position = position
         self.__constraints = constraints
+        self.__data_type = data_type
 
     @property
     def name(self):
@@ -285,12 +287,20 @@ class Column(SchemaObject):
         return self.__value_type
 
     @property
+    def data_type(self):
+        return self.__data_type
+
+    @property
     def value(self):
         return self.__value
 
     @property
     def default_value(self):
         return self.__default_value
+
+    @property
+    def data_value(self):
+        return self.__data_type
 
     @property
     def auto_increment(self):
@@ -417,7 +427,7 @@ class ExtendedSql(object):
         :param arg_converter:
         :return:
         """
-        return self.sql.sql_args(platforms, arg_converter)
+        return self.sql.arguments(platforms, arg_converter)
 
     def post_sql_args(self, platforms, arg_converter):
         """

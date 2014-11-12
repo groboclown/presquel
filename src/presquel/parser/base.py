@@ -448,6 +448,7 @@ class SchemaParser(object):
         column_obj = BaseObjectBuilder(self)
         name = None
         value_type = None
+        data_type = None
         value = None
         default_value = None
         auto_increment = False
@@ -472,6 +473,8 @@ class SchemaParser(object):
                 name = str(v).strip()
             elif k == 'type':
                 value_type = str(v).strip()
+            elif k == 'datatype':
+                data_type = str(v).strip()
             elif k == 'value':
                 value = self._parse_value_type_value(v)
             elif k == 'default' or k == 'defaultvalue':
@@ -495,8 +498,12 @@ class SchemaParser(object):
 
         assert name is not None and len(name) > 0
         assert value_type is not None and len(value_type) > 0
+        if data_type is None:
+            data_type = value_type
+        else:
+            assert len(data_type) > 0
         return Column(column_obj.order, column_obj.comment, name, value_type,
-                      value, default_value, auto_increment, remarks,
+                      data_type, value, default_value, auto_increment, remarks,
                       before_column, after_column, position, constraints,
                       changes)
 
