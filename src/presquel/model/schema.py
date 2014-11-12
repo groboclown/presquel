@@ -138,7 +138,6 @@ CONSTRAINT_TYPES = (
     'constantquery',
     'constantupdate', 'updatevalue',  # synonyms
     'restrictquery',
-    'validateread',
     'notnull',
     'validatewrite', 'validate',  # synonyms
     'valuerestriction',
@@ -157,9 +156,10 @@ class Constraint(SchemaObject):
         SchemaObject.__init__(self, constraint_type, order, comment,
                               CONSTRAINT_TYPE, changes)
         assert isinstance(constraint_type, str)
-        if constraint_type not in CONSTRAINT_TYPES:
-            raise Exception("invalid constraint type " + str(constraint_type))
         self.__constraint_type = _strip_keys(constraint_type)
+        if self.__constraint_type not in CONSTRAINT_TYPES:
+            raise Exception("invalid constraint type '" +
+                            str(constraint_type) + "'")
         details = details or {}
         assert isinstance(details, dict)
         self.__details = details
