@@ -144,6 +144,7 @@ CONSTRAINT_TYPES = (
     'constantupdate', 'updatevalue',  # synonyms
     'restrictquery',
     'notnull',
+    'nullable',
     'validatewrite', 'validate',  # synonyms
     'valuerestriction',
     'createrestriction',
