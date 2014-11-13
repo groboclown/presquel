@@ -121,7 +121,7 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
         if len(input_validations) > 0:
             sql += _generate_validation_triggers(table, input_validations)
 
-        return [ self._header(table), sql ]
+        return [self._header(table), sql]
 
     def _generate_base_view(self, view):
         """
@@ -159,21 +159,6 @@ class MySqlScriptGenerator(SchemaScriptGenerator):
         :return: list(str)
         """
         raise Exception("not implemented")
-
-    def _generate_upgrade_sqlchange(self, sql_change):
-        """
-        Generates the upgrade sql for a SqlChange object.  This can be called
-        if the platforms don't match.
-
-        Default implementation just returns the sql text.
-
-        :param sql_change:
-        :return: list(str)
-        """
-        if self.is_platform(sql_change.platforms):
-            return [sql_change.sql]
-        else:
-            return []
 
     def _generate_upgrade_table(self, table):
         """
@@ -448,4 +433,3 @@ def _generate_validation_triggers(table, csts):
          '\ndelimiter ;')
 
     return sql
-

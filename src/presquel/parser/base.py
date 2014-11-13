@@ -1,5 +1,5 @@
 
-from ..model.change import (Change, SqlChange, CHANGE_TYPES, SQL_CHANGE)
+from ..model.change import (SchemaChange, SqlChange, CHANGE_TYPES, SQL_CHANGE)
 from ..model.base import (SCHEMA_OBJECT_TYPES,
                      TABLE_TYPE, VIEW_TYPE, CONSTRAINT_TYPE, COLUMN_TYPE,
                      SqlString, SqlArgument)
@@ -398,17 +398,31 @@ class SchemaParser(object):
 
         change_obj = BaseObjectBuilder(self)
         sql_set = []
+        affects = []
         change_type = SQL_CHANGE
+        previous_name = None
 
         for (k, v) in change_dict.items():
             k = _strip_key(k)
             if change_obj.parse(k, v):
                 # handled
                 pass
-            elif k == 'schema' or k == 'schematype':
+            elif k in ['schema', 'schematype']:
                 schema_type = _parse_schema_type(v)
-            elif k == 'change' or k == 'changetype' or k == 'type':
+            elif k in ['change', 'changetype', 'type']:
                 change_type = _parse_change_type(v)
+            elif k in ['previously', 'fromname', 'was']:
+                previous_name = v.strip()
+            elif k == 'affects':
+                if isinstance(v, list) or isinstance(v, tuple):
+                    affects = []
+                    for val in v:
+                        affects.append(val.strip())
+                elif isinstance(v, str):
+                    affects = []
+                    vals = v.split(',')
+                    for val in vals:
+                        affects.append(val.strip())
             elif k == 'dialects':
                 for chv in self.fetch_dicts_from_list(
                         k, v, ['dialect']):
@@ -433,11 +447,11 @@ class SchemaParser(object):
             if len(sql_set) <= 0:
                 return self.error("requires 'sql' or 'dialects' for sql change")
             return SqlChange(change_obj.order, change_obj.comment, schema_type,
-                             SqlSet(sql_set, None))
+                             SqlSet(sql_set, None), affects)
         else:
-            # FIXME this is a bug
-            return Change(change_obj.order, change_obj.comment, schema_type,
-                          change_type)
+            return SchemaChange(change_obj.order, change_obj.comment,
+                                schema_type, change_type, previous_name,
+                                affects)
 
     def _parse_column(self, column_dict):
         """
@@ -617,7 +631,7 @@ class SchemaParser(object):
         assert isinstance(arg_dict, dict)
 
         name = None
-        atype = None
+        arg_type = None
         is_collection = False
 
         for (k, v) in arg_dict.items():
@@ -629,18 +643,17 @@ class SchemaParser(object):
                 assert len(name) > 0
             elif k == 'type':
                 assert isinstance(v, str)
-                assert atype is None
-                atype = v.strip()
-                assert len(atype) > 0
+                assert arg_type is None
+                arg_type = v.strip()
+                assert len(arg_type) > 0
         assert name is not None
-        assert atype is not None
-        assert isinstance(atype, str)
-        if atype.startswith("set "):
+        assert arg_type is not None
+        assert isinstance(arg_type, str)
+        if arg_type.startswith("set "):
             is_collection = True
-            atype = atype[4:].strip()
-            assert len(atype) > 0
-        return SqlArgument(name, atype, is_collection)
-
+            arg_type = arg_type[4:].strip()
+            assert len(arg_type) > 0
+        return SqlArgument(name, arg_type, is_collection)
 
     def parse_constraint(self, parent_column, constraint_dict):
         """

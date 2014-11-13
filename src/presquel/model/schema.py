@@ -137,6 +137,7 @@ CONSTRAINT_TYPES = (
     'fulltextindex',
     'spatialindex',
     'codeindex',  # index recognized by the code, not the schema
+    'codeforeignkey',  # foreign key recognized by the code, not the schema
     'initialvalue',
     'noupdate',
     'notread',
@@ -150,6 +151,7 @@ CONSTRAINT_TYPES = (
     'createrestriction',
     'updaterestriction',
     'updaterequired', 'requiredupdate',  # synonyms
+    'removed',  # placeholder; the constraint was dropped in the upgrade.
 )
 
 

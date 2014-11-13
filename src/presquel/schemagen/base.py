@@ -40,15 +40,16 @@ class SchemaScriptGenerator(object):
         else:
             raise Exception("Cannot generate schema with " + str(top_object))
 
-    def generate_upgrade(self, top_object):
+    def generate_upgrade(self, top_object, previous_version):
         """
 
         :param top_object:
         :return: list(str)
         """
         if isinstance(top_object, SchemaObject):
-            return self._generate_upgrade_schema(top_object)
+            return self._generate_upgrade_schema(top_object, previous_version)
         elif isinstance(top_object, SqlChange):
+            assert previous_version is None
             return self._generate_upgrade_sqlchange(top_object)
         else:
             raise Exception("Cannot generate upgrade schema with " +
@@ -138,7 +139,7 @@ class SchemaScriptGenerator(object):
         :return: list(str)
         """
         if self.is_platform(sql_change.platforms):
-            return [ sql_change.sql ]
+            return [sql_change.sql]
         else:
             return []
 
@@ -149,6 +150,23 @@ class SchemaScriptGenerator(object):
         :param table:
         :return: list(str)
         """
+        ret = []
+        for top_change in table.changes:
+            ret.extend(self._generate_upgrade_table_change(table, top_change))
+
+
+
+        for constraint in table.constraints:
+            for change in constraint.changes:
+                ret.extend(self._generate_upgrade_table_constraint(table,
+                           constraint, change))
+
+        raise NotImplementedError("not implemented")
+
+    def _generate_upgrade_table_change(self, table, change):
+        raise NotImplementedError("not implemented")
+
+    def _generate_upgrade_table_constraint(self, table, constraint, change):
         raise NotImplementedError("not implemented")
 
     def _generate_upgrade_view(self, view):

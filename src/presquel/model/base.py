@@ -69,15 +69,15 @@ class BaseObject(object):
         self.__object_type = object_type
 
     @property
-    def order(self):
+    def order(self) -> Order:
         return self.__order
 
     @property
-    def comment(self):
+    def comment(self) -> str:
         return self.__comment
 
     @property
-    def object_type(self):
+    def object_type(self) -> SchemaObjectType:
         return self.__object_type
 
     def __lt__(self, change):

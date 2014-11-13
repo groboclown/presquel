@@ -22,7 +22,7 @@ class AnalysisModel(object):
         self.__schema_packages = {}
         self.__schema_analysis = {}
 
-    def add_version(self, package_name, schema_version):
+    def add_version(self, package_name: str, schema_version: SchemaVersion):
         """
         Add a new schema version to this model.  This should not contain
         multiple versions of the same schema, but rather a single version of
@@ -45,24 +45,39 @@ class AnalysisModel(object):
             self.__schema_analysis[schema] = self._process_schema(schema)
 
     @property
-    def schemas(self):
+    def schemas(self) -> tuple(SchemaObject):
+        """
+        Registered top-level schema objects for this model.
+        """
         return tuple(self.__schemas)
 
-    def get_schema_named(self, name):
+    def get_schema_named(self, name: str) -> SchemaObject:
+        """
+        The schema object with the given full name.
+        """
         if name not in self.__schema_by_name:
             return None
         return self.__schema_by_name[name]
 
-    def get_schema_package(self, schema):
+    def get_schema_package(self, schema: SchemaObject) -> str:
+        """
+        The package name for the given schema object.  If no such schema object
+        is known, will generate a key error.
+        """
         return self.__schema_packages[schema]
 
-    def get_analysis_for(self, schema):
+    def get_analysis_for(self, schema: str or SchemaObject) -> SchemaAnalysis:
+        """
+        Find the analysis object.  Will generate a key error if the schema
+        object is not known.
+        """
         if isinstance(schema, str):
             schema = self.get_schema_named(schema)
         assert isinstance(schema, SchemaObject)
         return self.__schema_analysis[schema]
 
-    def get_schemas_referencing(self, schema):
+    def get_schemas_referencing(self, schema: str or SchemaObject) -> list(
+            (SchemaObject, ProcessedForeignKeyConstraint)):
         """
         Find all the schemas that have a foreign key that references the given
         schema.
@@ -87,7 +102,7 @@ class AnalysisModel(object):
                         break
         return ret
 
-    def _process_schema(self, schema):
+    def _process_schema(self, schema: SchemaObject) -> SchemaAnalysis:
         assert isinstance(schema, SchemaObject)
 
         if isinstance(schema, Table):
@@ -99,7 +114,8 @@ class AnalysisModel(object):
         analysis.update_references(self)
         return analysis
 
-    def _process_column_set(self, schema, is_read_only):
+    def _process_column_set(self, schema: SchemaObject,
+                            is_read_only: bool) -> SchemaAnalysis:
         assert isinstance(schema, Table) or isinstance(schema, View)
         pkg = self.get_schema_package(schema)
 
@@ -111,38 +127,48 @@ class AnalysisModel(object):
         top_constraints = []
         for c in schema.constraints:
             top_constraints.append(
-                self._process_constraint(schema, c, pkg, is_read_only))
+                self._process_constraint(schema, c, pkg))
 
         top_analysis = TopAnalysis(schema, pkg, top_constraints, is_read_only)
 
-        return self._create_columnset_analysis(
+        return self._create_column_set_analysis(
             schema, self.__schema_packages[schema], cols, top_analysis,
             is_read_only)
 
-    def _process_column(self, column, package, is_read_only):
+    def _process_column(self, column: Column, package: str,
+                        is_read_only: bool) -> ColumnAnalysis:
         constraints_analysis = []
         for c in column.constraints:
             constraints_analysis.append(
-                self._process_constraint(column, c, package, is_read_only))
+                self._process_constraint(column, c, package))
         return self._create_column_analysis(
             column, package, constraints_analysis, is_read_only)
 
-    def _process_constraint(self, column, constraint, package, is_read_only):
+    @staticmethod
+    def _process_constraint(schema: SchemaObject, constraint: Constraint,
+                            package: str) -> AbstractProcessedConstraint:
         assert isinstance(constraint, Constraint)
 
-        if constraint.constraint_type in ['foreignkey',
-                                          'falseforeignkey', 'fakeforeignkey']:
-            return ProcessedForeignKeyConstraint(column, package, constraint)
+        if (constraint.constraint_type in
+                ['foreignkey', 'codeforeignkey']):
+            assert isinstance(schema, Column)
+            return ProcessedForeignKeyConstraint(schema, package, constraint)
 
-        return AbstractProcessedConstraint(column, package, constraint)
+        return AbstractProcessedConstraint(schema, package, constraint)
 
-    def _create_columnset_analysis(self, schema, package, column_analysis,
-                                   top_analysis, is_read_only):
+    @staticmethod
+    def _create_column_set_analysis(schema: SchemaObject, package: str,
+                                    column_analysis: list(ColumnAnalysis),
+                                    top_analysis: TopAnalysis,
+                                    is_read_only: bool) -> ColumnSetAnalysis:
         return ColumnSetAnalysis(schema, package, tuple(column_analysis),
                                  top_analysis, is_read_only)
 
-    def _create_column_analysis(self, column, package, constraints_analysis,
-                                is_read_only):
+    @staticmethod
+    def _create_column_analysis(column: Column, package: str,
+                                constraints_analysis: list(
+                                    AbstractProcessedConstraint),
+                                is_read_only: bool) -> ColumnAnalysis:
         return ColumnAnalysis(column, package, constraints_analysis,
                               is_read_only)
 
@@ -158,26 +184,36 @@ class SchemaAnalysis(object):
         self.__sql_name = schema_obj.name
 
     @property
-    def package(self):
+    def package(self) -> str:
+        """
+        Name of this schema's package.
+        """
         return self.__package
 
     @property
-    def schema(self):
+    def schema(self) -> SchemaObject:
+        """
+        The schema this object analyzes.
+        """
         return self.__schema
 
     @property
-    def sql_name(self):
+    def sql_name(self) -> str:
+        """
+        The sql name for this schema object.
+        """
         return self.__sql_name
 
-    def update_references(self, analysis_model):
+    def update_references(self, analysis_model: AnalysisModel):
         assert isinstance(analysis_model, AnalysisModel)
         # Nothing to do
         pass
 
 
 class ColumnSetAnalysis(SchemaAnalysis):
-    def __init__(self, schema_obj, package, columns_analysis, top_analysis,
-                 is_read_only):
+    def __init__(self, schema_obj: Table or View, package: str,
+                 columns_analysis: tuple(ColumnAnalysis),
+                 top_analysis: TopAnalysis, is_read_only: bool):
         SchemaAnalysis.__init__(self, schema_obj, package)
         assert isinstance(schema_obj, Table) or isinstance(schema_obj, View)
         assert isinstance(columns_analysis, tuple)
@@ -186,23 +222,23 @@ class ColumnSetAnalysis(SchemaAnalysis):
         self.__top_analysis = top_analysis
         self.__is_read_only = is_read_only
 
-    def update_references(self, analysis_model):
+    def update_references(self, analysis_model: AnalysisModel):
         assert isinstance(analysis_model, AnalysisModel)
         SchemaAnalysis.update_references(self, analysis_model)
 
-        for c in self.__columns_analysis:
-            c.update_references(analysis_model)
+        for col in self.__columns_analysis:
+            col.update_references(analysis_model)
         self.__top_analysis.update_references(analysis_model)
 
     @property
-    def is_read_only(self):
+    def is_read_only(self) -> bool:
         return self.__is_read_only
 
     @property
-    def columns_analysis(self):
+    def columns_analysis(self) -> tuple(ColumnAnalysis):
         return self.__columns_analysis
 
-    def get_column_analysis(self, column):
+    def get_column_analysis(self, column) -> ColumnAnalysis:
         """
         Find the column analysis for the given column
 
@@ -223,11 +259,11 @@ class ColumnSetAnalysis(SchemaAnalysis):
             raise Exception("column must be str or Column value")
 
     @property
-    def top_analysis(self):
+    def top_analysis(self) -> TopAnalysis:
         return self.__top_analysis
 
     @property
-    def foreign_keys_analysis(self):
+    def foreign_keys_analysis(self) -> list(ProcessedForeignKeyConstraint):
         """
 
         :return: a list of ProcessedForeignKeyConstraint values for all
@@ -241,10 +277,10 @@ class ColumnSetAnalysis(SchemaAnalysis):
                     ret.append(ca)
         return ret
 
-    def get_selectable_column_lists(self):
+    def get_selectable_column_lists(self) -> list(Column):
         """
 
-        :return: a list of list of __columns that can be used to query the
+        :return: a list of list of columns that can be used to query the
             schema.  The column information will be the Column schema object.
             These Column schema objects will only be from this table object,
             never from the joined tables.  That behavior must instead be done
@@ -264,13 +300,14 @@ class ColumnSetAnalysis(SchemaAnalysis):
                 assert isinstance(col, str)
                 ca = self.get_column_analysis(col)
                 if ca is None:
-                    raise Exception("no schema for " + col + " in " + self.sql_name)
+                    raise Exception("no schema for " + col + " in " +
+                                    self.sql_name)
                 cis.append(ca.schema)
             ret.append(cis)
 
         return ret
 
-    def get_write_validations(self):
+    def get_write_validations(self) -> list((Column, Constraint)):
         """
 
         :return: list of pairs: (column, validation constraint).  If it
@@ -285,7 +322,7 @@ class ColumnSetAnalysis(SchemaAnalysis):
         return ret
 
     @property
-    def top_write_validations(self):
+    def top_write_validations(self) -> list(Constraint):
         """
 
         :return: list of all top-level validations for read operations
@@ -297,7 +334,7 @@ class ColumnSetAnalysis(SchemaAnalysis):
         return ret
 
     @property
-    def primary_key_columns(self):
+    def primary_key_columns(self) -> list(ColumnAnalysis):
         """
         Generally used for the delete creation.
 
@@ -326,16 +363,16 @@ class ColumnSetAnalysis(SchemaAnalysis):
         return ret or []
 
     @property
-    def columns_for_read(self):
+    def columns_for_read(self) -> ColumnAnalysis:
         ret = []
-        for c in self.columns_analysis:
-            assert isinstance(c, ColumnAnalysis)
-            if c.is_read:
-                ret.append(c)
+        for col in self.columns_analysis:
+            assert isinstance(col, ColumnAnalysis)
+            if col.is_read:
+                ret.append(col)
         return ret
 
     @property
-    def columns_for_create(self):
+    def columns_for_create(self) -> list(ColumnAnalysis):
         """
 
         :return: the __columns which are involved in the creation of the rows.
@@ -345,14 +382,14 @@ class ColumnSetAnalysis(SchemaAnalysis):
             return []
 
         ret = []
-        for c in self.columns_analysis:
-            assert isinstance(c, ColumnAnalysis)
-            if c.allows_create:
-                ret.append(c)
+        for col in self.columns_analysis:
+            assert isinstance(col, ColumnAnalysis)
+            if col.allows_create:
+                ret.append(col)
         return ret
 
     @property
-    def columns_for_update(self):
+    def columns_for_update(self) -> list(ColumnAnalysis):
         """
 
         :return: the __columns which are involved in updating rows
@@ -361,15 +398,17 @@ class ColumnSetAnalysis(SchemaAnalysis):
             return []
 
         ret = []
-        for c in self.columns_analysis:
-            assert isinstance(c, ColumnAnalysis)
-            if c.allows_update:
-                ret.append(c)
+        for col in self.columns_analysis:
+            assert isinstance(col, ColumnAnalysis)
+            if col.allows_update:
+                ret.append(col)
         return ret
 
 
 class ColumnAnalysis(SchemaAnalysis):
-    def __init__(self, column, package, constraints_analysis, is_read_only):
+    def __init__(self, column: Column, package: str,
+                 constraints_analysis: list(AbstractProcessedConstraint),
+                 is_read_only: bool):
         SchemaAnalysis.__init__(self, column, package)
         assert isinstance(column, Column)
         self.is_read_only = is_read_only
@@ -446,7 +485,7 @@ class ColumnAnalysis(SchemaAnalysis):
 
         self.read_by = self.read_by and self.is_read
 
-    def update_references(self, analysis_model):
+    def update_references(self, analysis_model: AnalysisModel):
         assert isinstance(analysis_model, AnalysisModel)
         SchemaAnalysis.update_references(self, analysis_model)
 
@@ -455,7 +494,12 @@ class ColumnAnalysis(SchemaAnalysis):
 
     @property
     def name_as_sql_argument(self):
-        return SqlArgument(self.sql_name, self.schema.value_type, False)
+        # The schema is a Column, but some Python checkers see this as a
+        # SchemaObject due to the parent class ensuring it's that parent
+        # class.  So we add this bit of inefficiency to satisfy the checkers.
+        schema_val = self.schema
+        assert isinstance(schema_val, Column)
+        return SqlArgument(self.sql_name, schema_val.value_type, False)
 
     @property
     def create_arguments(self):
@@ -497,7 +541,9 @@ class TopAnalysis(SchemaAnalysis):
         together as a group.
     """
 
-    def __init__(self, schema, package, constraints_analysis, is_read_only):
+    def __init__(self, schema: Table or View, package: str,
+                 constraints_analysis: list(AbstractProcessedConstraint),
+                 is_read_only: bool):
         SchemaAnalysis.__init__(self, schema, package)
         assert (isinstance(schema, Table) or isinstance(schema, View))
 
@@ -532,28 +578,30 @@ class TopAnalysis(SchemaAnalysis):
 
 
 class AbstractProcessedConstraint(SchemaAnalysis):
-    def __init__(self, column, package, constraint, name = None):
+    def __init__(self, schema: SchemaObject, package: str,
+                 constraint: Constraint, name=None):
         SchemaAnalysis.__init__(self, constraint, package)
 
-        self.column = column
-        if column is not None and (isinstance(column, Table) or
-                                   isinstance(column, View)):
+        self.column = schema
+        if schema is not None and (isinstance(schema, Table) or
+                                   isinstance(schema, View)):
             self.column = None
 
         assert self.column is None or isinstance(self.column, Column)
         assert isinstance(constraint, Constraint)
 
         self.constraint = constraint
-        self.column_name = name or column.name
+        self.column_name = name or schema.name
 
         self.arguments = getattr(constraint, 'arguments', [])
 
 
 class ProcessedForeignKeyConstraint(AbstractProcessedConstraint):
-    def __init__(self, column, package, constraint):
+    def __init__(self, column: Column, package: str, constraint: Constraint):
         AbstractProcessedConstraint.__init__(self, column, package, constraint)
+        assert isinstance(column, Column)
 
-        if '__columns' in constraint.details:
+        if 'columns' in constraint.details:
             raise Exception(column.name +
                             ": we do not handle multiple column foreign keys")
         self.is_owner = False
@@ -569,7 +617,7 @@ class ProcessedForeignKeyConstraint(AbstractProcessedConstraint):
                 constraint.details['pull'] == 'always'):
             self.join = True
 
-    def update_references(self, analysis_model):
+    def update_references(self, analysis_model: AnalysisModel):
         assert isinstance(analysis_model, AnalysisModel)
         AbstractProcessedConstraint.update_references(self, analysis_model)
 
