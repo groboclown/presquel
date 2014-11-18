@@ -13,23 +13,14 @@ extension (.json, .xml, .yaml) are read as a schema file.
 """
 
 from . import PARSERS_BY_EXTENSION
-from ..model.version import (SchemaVersion)
+from ..model.version import (
+    SchemaVersion, SchemaPackage, SchemaVersionNumber, SchemaBranch, ErrorObject
+)
+from ..model.base import (BaseObject)
 from ..model.change import (Change)
 from ..model.schema import (SchemaObject)
-import os.path
-
-
-def find_files_for_version(version_dir_name):
-    """
-    An iterable discovery of the files within a version.
-
-    :param version_dir_name:
-    :return: iteration of the full file names within the directory
-    """
-
-    for root, dirs, files in os.walk(version_dir_name):
-        for f in files:
-            yield os.path.join(root, f)
+import os
+import re
 
 
 def find_version_dirs(root_dir):
@@ -40,10 +31,9 @@ def find_version_dirs(root_dir):
     :param root_dir:
     :return tuple: list of (dir index, full directory name)
     """
-
-    print("DEBUG: find_version_dirs("+repr(root_dir)+")")
+    # print("DEBUG: find_version_dirs("+repr(root_dir)+")")
     for name in os.listdir(root_dir):
-        print("DEBUG: --"+repr(name))
+        # print("DEBUG: --"+repr(name))
         full_name = os.path.join(root_dir, name)
         if os.path.isdir(full_name):
             if name.count("_") > 0:
@@ -54,7 +44,7 @@ def find_version_dirs(root_dir):
                 yield (int(name), full_name)
 
 
-def parse_versions(root_dir):
+def parse_branches(root_dir) -> SchemaPackage:
     """
     Finds and parses all the schema versions in the given directory.  The
     returned list of schemas will be sorted, with the most recent version
@@ -64,33 +54,102 @@ def parse_versions(root_dir):
     :return:
     """
 
-    ret = []
-    for (version_number, version_dir) in find_version_dirs(root_dir):
+    # FIXME
+
+
+DEFAULT_VERSION_PATTERN_STR = "(?:v|\\.|_)(\\d+)"
+DEFAULT_VERSION_PATTERN = re.compile(DEFAULT_VERSION_PATTERN_STR)
+DEFAULT_NAME_PATTERN = re.compile("(" + DEFAULT_VERSION_PATTERN_STR + ")+")
+MANIFEST_FILE_NAME = '_manifest.yaml'
+
+
+class VersionMetadata(object):
+    """
+    Default metadata version.  Loads the branch, using the base directory name
+    as the version number.
+    """
+    def __init__(self, base_dir: str, package: str,
+                 version_numbers: tuple(int)):
+        object.__init__(self)
+        self.__basedir = base_dir
+        self.__package = package
+
+        self.__name = os.path.basename(base_dir)
+        self.__version = SchemaVersionNumber(version_numbers)
+        self.__has_known_parent_version = False
+        self.__known_parent_version = None
+
+    @staticmethod
+    def matches(package: str, base_dir: str):
+        name = os.path.basename(base_dir)
+        if DEFAULT_NAME_PATTERN.fullmatch(name) is not None:
+            # convert the list of version strings to integers
+            version_strings = DEFAULT_VERSION_PATTERN.findall(name)
+            numbers = []
+            for ver in version_strings:
+                numbers.append(int(ver))
+            return VersionMetadata(base_dir, package, numbers)
+        return None
+
+    @property
+    def version(self) -> SchemaVersionNumber:
+        return self.__version
+
+    @property
+    def package(self) -> str:
+        return self.__package
+
+    @property
+    def has_known_parent_version(self) -> bool:
+        return self.__has_known_parent_version
+
+    @property
+    def known_parent_version(self) -> SchemaVersionNumber:
+        return self.__known_parent_version
+
+    def load_branch(self, parent_version: SchemaVersionNumber) -> SchemaBranch:
+        """
+        Relies upon the caller to properly construct the parent version, if this
+        object doesn't directly declare it.
+        """
+        if (self.has_known_parent_version and
+                parent_version != self.known_parent_version):
+            raise Exception("version number mismatch")
+
+        return SchemaBranch(
+            parent_version, self.__package,
+            branch_loader=self.load_version, version=self.version)
+
+    def load_version(self) -> SchemaVersion:
+        """
+        Load the version data.
+        """
+
         changes = []
-        schemas = []
-        for file_name in find_files_for_version(version_dir):
-            (root, ext) = os.path.splitext(file_name)
-            if ext and len(ext) > 0:
-                ext = ext.lower()
-                if ext in PARSERS_BY_EXTENSION:
-                    print("DEBUG: " + file_name)
-                    with open(file_name, 'r') as f:
-                        _split_changes_schemas(
-                            PARSERS_BY_EXTENSION[ext].parse(file_name, f),
-                            changes,
-                            schemas)
-        ret.append(SchemaVersion(version_number, changes, schemas))
-    ret = sorted(ret)
-    ret.reverse()
-    return ret
+        schema = []
+        errors = []
 
+        # Recurse in the directory
+        for root, dirs, files in os.walk(self.__basedir):
+            for file_name in files:
+                if file_name.strip().lower() == MANIFEST_FILE_NAME:
+                    continue
+                name = os.path.join(root, file_name)
+                with open(file_name, 'r', encoding='UTF-8') as stream:
+                    values = VersionMetadata.load_file(name, stream)
+                    for value in values:
+                        if isinstance(value, Change):
+                            changes.append(value)
+                        elif isinstance(value, SchemaObject):
+                            schema.append(value)
+                        elif isinstance(value, ErrorObject):
+                            errors.append(value)
+                        else:
+                            raise Exception(file_name + ": invalid return type")
+        return SchemaVersion(
+            self.package, self.version, changes, schema, errors)
 
-def _split_changes_schemas(values, changes, schemas):
-    for v in values:
-        if isinstance(v, Change):
-            changes.append(v)
-        elif isinstance(v, SchemaObject):
-            schemas.append(v)
-        else:
-            raise Exception("internal error: unexpected type " + str(type(v)) +
-                            ": " + str(v))
+    @staticmethod
+    def load_file(source_name, stream) -> tuple(BaseObject):
+        ext = os.path.splitext(source_name)[1]
+        return PARSERS_BY_EXTENSION[ext].parse(source_name, stream)

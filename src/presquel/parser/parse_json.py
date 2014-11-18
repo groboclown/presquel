@@ -3,6 +3,6 @@ from .base import SchemaParser
 
 
 class JsonSchemaParser(SchemaParser):
-    def parse(self, stream):
+    def _parse_stream(self, stream):
         # FIXME
         return []

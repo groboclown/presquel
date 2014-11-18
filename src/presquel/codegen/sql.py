@@ -44,7 +44,9 @@ class ReadQueryData(object):
                         # FIXME this is mysql specific syntax.
                         # FIXME this should instead use the SqlConstraint
                         # method to get the replaced string.
-                        value = value.replace('{' + arg + '}', ':' + arg)
+                        assert isinstance(arg, SqlArgument)
+                        value = value.replace('{' + arg.name + '}',
+                                              ':' + arg.name)
                     # FIXME is this the correct thing to do?
                     col_query.append(value + ' AS ' + column.sql_name)
                     arguments.extend(sql_set.arguments)
@@ -64,8 +66,14 @@ class ReadQueryData(object):
                 assert isinstance(sql_set, SqlSet)
                 value = sql_set.get_for_platform(platforms)
                 if value is not None:
-                    for arg in constraint.arguments:
-                        value = value.replace('{' + arg + '}', ':' + arg)
+                    for arg in constraint.sql.arguments:
+                        assert isinstance(arg, SqlArgument)
+
+                        # FIXME check if the argument is a collection
+                        # FIXME use a real conversion
+
+                        value = value.replace('{' + arg.name + '}',
+                                              ':' + arg.name)
                         arguments.append(arg)
                     where_ands.append(value)
 

@@ -12,3 +12,4 @@ project.
 
 * Imported from webriffs.
 * Included support for creating triggers that validate input.
+* Support for upgrade added (in progress).

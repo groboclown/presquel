@@ -22,15 +22,11 @@ class AnalysisModel(object):
         self.__schema_packages = {}
         self.__schema_analysis = {}
 
-    def add_version(self, package_name: str, schema_version: SchemaVersion):
+    def add_version(self, schema_version: SchemaVersion):
         """
         Add a new schema version to this model.  This should not contain
         multiple versions of the same schema, but rather a single version of
         multiple schemas.
-
-        :param package_name:
-        :param schema_version: SchemaVersion
-        :return:
         """
         assert isinstance(schema_version, SchemaVersion)
         for schema in schema_version.schema:
@@ -41,7 +37,7 @@ class AnalysisModel(object):
                                 name)
             self.__schema_by_name[name] = schema
             self.__schemas.append(schema)
-            self.__schema_packages[schema] = package_name
+            self.__schema_packages[schema] = schema_version.package
             self.__schema_analysis[schema] = self._process_schema(schema)
 
     @property
@@ -174,7 +170,7 @@ class AnalysisModel(object):
 
 
 class SchemaAnalysis(object):
-    def __init__(self, schema_obj, package):
+    def __init__(self, schema_obj: SchemaObject, package: str):
         object.__init__(self)
         assert isinstance(schema_obj, SchemaObject)
         assert hasattr(schema_obj, 'name')
@@ -241,9 +237,6 @@ class ColumnSetAnalysis(SchemaAnalysis):
     def get_column_analysis(self, column) -> ColumnAnalysis:
         """
         Find the column analysis for the given column
-
-        :param column:
-        :return:
         """
         if isinstance(column, str):
             for col in self.columns_analysis:

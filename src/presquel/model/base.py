@@ -55,10 +55,8 @@ class BaseObject(object):
     Base schema object, used by changes and schema definitions for user
     constructed schema.
     """
-    def __init__(self, order, comment, object_type):
+    def __init__(self, order: Order, comment, object_type):
         object.__init__(self)
-        if isinstance(order, list) or isinstance(order, tuple):
-            order = Order(order)
         if not isinstance(order, Order):
             raise Exception("order must be Order, found " + repr(order))
         if comment is not None and not isinstance(comment, str):
@@ -309,3 +307,4 @@ PROCEDURE_TYPE = SchemaObjectType('procedure')
 SCHEMA_OBJECT_TYPES = (COLUMN_TYPE, CONSTRAINT_TYPE, LOOKUP_TABLE_TYPE,
                        PRIMARY_KEY_TYPE, SEQUENCE_TYPE, INDEX_TYPE, TABLE_TYPE,
                        VIEW_TYPE)
+

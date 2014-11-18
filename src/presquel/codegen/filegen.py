@@ -8,10 +8,9 @@ from ..model.schema import (ExtendedSql)
 import os
 
 
-
 class GenConfig(object):
-    def __init__(self, analysis_obj, output_dir = None, platforms = None,
-            prep_sql_converter = None):
+    def __init__(self, analysis_obj, output_dir=None, platforms=None,
+                 prep_sql_converter=None):
         object.__init__(self)
 
         assert isinstance(analysis_obj, ColumnSetAnalysis)
@@ -24,7 +23,6 @@ class GenConfig(object):
         # FIXME pull from Python built-ins
         self.line_separator = '\n'
 
-
     def validate(self):
         assert self.output_dir is not None
         assert isinstance(self.analysis_obj, ColumnSetAnalysis)
@@ -33,7 +31,6 @@ class GenConfig(object):
                 isinstance(self.platforms, tuple))
         assert len(self.platforms) > 0
         assert isinstance(self.prep_sql_converter, PrepSqlConverter)
-
 
 
 class LanguageGenerator(object):
@@ -85,7 +82,6 @@ class LanguageGenerator(object):
 
     def generate_footer(self, config):
         raise NotImplementedError()
-
 
 
 class FileGen(object):
@@ -188,4 +184,3 @@ class FileGen(object):
         assert isinstance(config, GenConfig)
         assert isinstance(lines, tuple) or isinstance(lines, list)
         out.writelines(config.line_separator.join(lines))
-

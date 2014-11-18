@@ -4,5 +4,5 @@ import yaml
 
 
 class YamlSchemaParser(SchemaParser):
-    def parse(self, source, stream):
-        return self._parse_dict(source, yaml.load(stream))
+    def _parse_stream(self, source, stream):
+        return self._parse_dict(yaml.load(stream))

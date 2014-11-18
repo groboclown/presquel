@@ -11,7 +11,7 @@ class PrepSqlConverter(object):
     Manages the conversion of a model SqlArgument into a prepared statement
     string argument.
     """
-    def __init__(self, language, platforms):
+    def __init__(self, language: str, platforms: tuple(str)):
         object.__init__(self)
         assert isinstance(language, str)
         assert isinstance(platforms, list) or isinstance(platforms, tuple)
@@ -21,7 +21,7 @@ class PrepSqlConverter(object):
         self.__platforms = tuple(platforms)
 
     @property
-    def language(self):
+    def language(self) -> str:
         """
         Software language for which this generates SQL
 
@@ -30,7 +30,7 @@ class PrepSqlConverter(object):
         return self.__language
 
     @property
-    def platforms(self):
+    def platforms(self) -> tuple(str):
         """
         List of SQL platforms tha this converter uses.
 
@@ -38,7 +38,7 @@ class PrepSqlConverter(object):
         """
         return self.__platforms
 
-    def generate_code(self, output_variable, arg):
+    def generate_code(self, output_variable: str, arg):
         """
         Creates the language-specific code related to this SqlSet or
         InputValue or Constraint or LanguageSet.
@@ -92,7 +92,7 @@ class PrepSqlConverter(object):
         sql = sql_set.get_for_platform(self.platforms)
 
         # Split the sql into bits for insertion
-        sql_bits = [ [ 0, sql ] ]
+        sql_bits = [[0, sql]]
 
         has_collections = False
 
@@ -112,8 +112,8 @@ class PrepSqlConverter(object):
                             bit = bit[pos + len(match):]
                         else:
                             bit = (bit[0:pos] +
-                                self._generate_sql_parameter(arg.name) +
-                                bit[pos + len(match):])
+                                   self._generate_sql_parameter(arg.name) +
+                                   bit[pos + len(match):])
                     if len(bit) > 0:
                         new_bits.append([0, bit])
                 else:

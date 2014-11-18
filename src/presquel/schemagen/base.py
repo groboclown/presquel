@@ -4,6 +4,7 @@ Base classes used for the generation of code based on the model objects.
 
 from ..model.schema import (SchemaObject, View, Table, Sequence, Procedure)
 from ..model.change import (Change, SqlChange)
+from .upgrade import (UpgradeAnalysis)
 
 
 class SchemaScriptGenerator(object):

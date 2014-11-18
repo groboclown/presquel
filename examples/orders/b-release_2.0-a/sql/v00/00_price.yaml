@@ -1,0 +1,37 @@
+# Simple table that contains the data input.
+
+table:
+  name: PRICE
+  columns:
+  - column:
+      name: Price_Id
+      type: int
+      autoIncrement: true
+      constraints:
+      - constraint:
+          type: primary key
+          name: Price__Price_Id__Key
+  - column:
+      name: Product_Sku
+      type: nvarchar(255)
+      constraints:
+      - constraint:
+          type: not null
+      - constraint:
+          type: unique index
+          name: Price__Product_Sku__Idx
+  - column:
+      name: Price
+      type: float
+      constraints:
+      - constraint:
+          type: not null
+        
+      # SQL trigger for updates on price updates
+      - constraint:
+          type: value restriction
+          message: price must be non-negative
+          dialects:
+          - dialect:
+              platforms: all
+              sql: "{Price} >= 0.0"

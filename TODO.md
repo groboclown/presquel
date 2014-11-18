@@ -39,7 +39,7 @@ Then the Python code would find all the parts with:
 where `filename` is the name of each file, starting after the base directory.
 It should have some smarts to detect if the parts are all numbers (and should
 be parsed as numbers, so that '9' is ordered before '12').
-    
+
 
 ## SQL Change
 
@@ -49,6 +49,8 @@ sql generation, which has yet to be done.
 
 First, the tool needs the definition and refinement for the syntax that
 describes how the schema changed.  Then actual development can follow.
+
+(In progress)
 
 
 ## File Format Support
@@ -68,3 +70,12 @@ Need support for other sql platforms than just MySql.
 PostGres, Oracle, and Sql Server are all good contenders.
 
 Also, additional languages are in need of generation beyond just PHP.
+
+
+## Error reporting
+
+The parser, sql generator, and code generators incorrectly throw exceptions,
+rather than collecting problems and reporting them in a nice way to the user.
+Changing the code around so that error reporting is more user-friendly will
+go a long way to making a better tool.
+

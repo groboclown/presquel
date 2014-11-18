@@ -2,6 +2,6 @@ from .base import SchemaParser
 
 
 class XmlSchemaParser(SchemaParser):
-    def parse(self, stream):
+    def _parse_stream(self, stream):
         # FIXME
         return []

@@ -10,7 +10,6 @@ class MySqlPrepSqlConverter(PrepSqlConverter):
     def __init__(self, language, platforms):
         PrepSqlConverter.__init__(self, language, platforms)
 
-
     def _generate_code_for_collection_arguments(self, output_variable, sql_set,
             sql_bits):
         """

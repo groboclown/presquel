@@ -28,6 +28,9 @@ SQL_CHANGE = ChangeType('sql')
 CHANGE_TYPES = (ADD_CHANGE, REMOVE_CHANGE, RENAME_CHANGE, ALTER_CHANGE,
                 SQL_CHANGE)
 
+# Not in the list of normal change types
+ERROR_CHANGE_TYPE = ChangeType('error')
+
 
 class Change(BaseObject):
     """
