@@ -34,16 +34,23 @@ def run_py(script, *args):
 
 def clean():
     if os.path.exists('exports'):
-        shutil.rmtree('exports')
+        shutil.rmtree('exports', ignore_errors=False)
 
 
 def generate_sql():
-    run_py('genBaseSql.py', 'mysql', todir('sql'), todir('exports', 'sql'))
+    ret = run_py('genBaseSql.py',
+                 '-p', 'mysql',
+                 '-o', os.path.join('exports', 'sql'),
+                 todir('sql'))
+    if ret != 0:
+        sys.exit(ret)
 
 
 def generate_php_dbo():
-    run_py('genPhpDboLayer.py', 'DboParent', 'Dbo', todir('sql'),
-           todir('exports', 'php_dbo'))
+    ret = run_py('genPhpDboLayer.py', 'DboParent', 'Dbo', todir('sql'),
+                 todir('exports', 'php_dbo'))
+    if ret != 0:
+        sys.exit(ret)
 
 
 def copy_to_exports():

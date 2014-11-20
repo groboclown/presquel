@@ -79,8 +79,10 @@ class SchemaVersionNumber(object):
     """
     Represents a version number for a schema, which is a dewey decimal series
     of integers.
+
+    :type versions: tuple[int] or list[int]
     """
-    def __init__(self, *versions: tuple(int)):
+    def __init__(self, versions: tuple or list):
         object.__init__(self)
         for vsn in versions:
             assert isinstance(vsn, int)
@@ -88,17 +90,25 @@ class SchemaVersionNumber(object):
         self.__versions = tuple(versions)
 
     @property
-    def decimals(self) -> tuple(int):
+    def decimals(self) -> tuple:
+        """
+        :rtype: tuple[int]
+        """
         return self.__versions
 
     @property
     def depth(self) -> int:
         return len(self.__versions)
 
-    def is_parent_decimal_of(self, other: SchemaVersionNumber) -> bool:
+    def is_version(self, version_str: str) -> bool:
+        return str(self) == version_str
+
+    def is_parent_decimal_of(self, other) -> bool:
         """
         Returns ``True`` if self has the same decimal numbers up to
         a higher depth of the other, but has no other numbers below that.
+
+        :type other: SchemaVersionNumber
         """
         assert isinstance(other, SchemaVersionNumber)
         if other.depth <= self.depth:
@@ -112,10 +122,12 @@ class SchemaVersionNumber(object):
         # child
         return True
 
-    def is_sibling_decimal_of(self, other: SchemaVersionNumber) -> bool:
+    def is_sibling_decimal_of(self, other) -> bool:
         """
         Returns ``True`` if self and other have the same depth, and same numbers
         up to the penultimate number.
+
+        :type other: SchemaVersionNumber
         """
         assert isinstance(other, SchemaVersionNumber)
         if other.depth != self.depth:
@@ -180,6 +192,10 @@ class SchemaVersionNumber(object):
     def __str__(self) -> str:
         return ".".join([str(val) for val in self.decimals])
 
+    def __repr__(self) -> str:
+        return "SchemaVersionNumber({})".format(", ".join(
+            [repr(dec) for dec in self.decimals]))
+
 
 class SchemaVersion(object):
     """
@@ -187,24 +203,22 @@ class SchemaVersion(object):
     get here from the previous version.
 
     The "version" must be an integer or a list of integers.
+
+    :type top_changes: list[Change] or tuple[Change]
+    :type schema: list[SchemaObject] or tuple[SchemaObject]
+    :type errors: list[ErrorObject] or tuple[ErrorObject]
     """
     def __init__(self, package: str, version: SchemaVersionNumber,
-                 top_changes: list(Change),
-                 schema: list(SchemaObject),
-                 errors: list(ErrorObject)):
+                 top_changes: list or tuple,
+                 schema: list or tuple,
+                 errors: list or tuple):
         object.__init__(self)
 
         assert isinstance(package, str) and len(package) > 0
         self.__package = package
 
-        if isinstance(version, int):
-            version = [version]
-        if not (isinstance(version, list) or isinstance(version, tuple)):
-            raise Exception('"version" must be a list or int, found ' +
-                            repr(version))
-        for vpt in version:
-            assert isinstance(vpt, int)
-        self.__version = tuple(version)
+        assert isinstance(version, SchemaVersionNumber)
+        self.__version = version
 
         assert isinstance(schema, list) or isinstance(schema, tuple)
         for sch in schema:
@@ -218,7 +232,10 @@ class SchemaVersion(object):
         self.__problems = tuple(errors)
 
     @property
-    def problems(self) -> tuple(ErrorObject):
+    def problems(self) -> tuple:
+        """
+        :rtype: tuple[ErrorObject]
+        """
         return self.__problems
 
     @property
@@ -234,7 +251,10 @@ class SchemaVersion(object):
         return self.__top_changes
 
     @property
-    def schema(self) -> list(SchemaObject):
+    def schema(self) -> list:
+        """
+        :rtype: list[SchemaObject]
+        """
         return self.__schema
 
     # FIXME remove these once the corresponding checking code is removed
@@ -262,11 +282,14 @@ class SchemaBranch(object):
     corresponding ``SchemaVersionNumber`` as an argument, so that the same
     value can be reused.
     """
-    def __init__(self, parent: SchemaBranch or None,
+    def __init__(self, parent: object or None,
                  package: str,
                  branch: SchemaVersion or None=None,
                  branch_loader: callable or None=None,
                  version: SchemaVersionNumber or None=None):
+        """
+        :type parent: SchemaBranch or None
+        """
         object.__init__(self)
 
         assert parent is None or isinstance(parent, SchemaBranch)
@@ -314,7 +337,10 @@ class SchemaBranch(object):
         return self.__parent
 
     @property
-    def children(self) -> tuple(SchemaBranch):
+    def children(self) -> tuple:
+        """
+        :rtype: tuple[SchemaBranch]
+        """
         return tuple(self._children)
 
     # def _is_ancestor(self, branch: SchemaBranch) -> bool:
@@ -353,18 +379,22 @@ class SchemaPackage(object):
         return self.__package
 
     @property
-    def branches(self) -> tuple(SchemaBranch):
+    def branches(self) -> tuple:
         """
         All resolved branches.
+
+        :rtype: tuple[SchemaBranch]
         """
         return self.__version_map.values()
 
     @property
-    def unresolved_branch_versions(self) -> tuple(SchemaVersionNumber):
+    def unresolved_branch_versions(self) -> list:
         """
         If a registered branch notes a particular version as its parent, but
         that parent is never registered, then the parent is marked as
         "unresolved", and is returned by this property.
+
+        :rtype: list[SchemaVersionNumber]
         """
         ret = []
         for parent, branch in self.__unresolved_parents_loaded:
@@ -376,6 +406,24 @@ class SchemaPackage(object):
             ret.append(version)
 
         return ret
+
+    def get_versions(self) -> tuple:
+        """
+        :rtype: tuple[SchemaVersionNumber]
+        """
+        return self.__version_map.keys()
+
+    def get_newest_version(self) -> SchemaBranch or None:
+        if len(self.__version_map) <= 0:
+            return None
+        versions = list(self.get_versions())
+        versions.sort(reverse=True)
+        return self.__version_map[versions[0]]
+
+    def get_version(self, version: SchemaVersionNumber) -> SchemaBranch or None:
+        if version in self.__version_map:
+            return self.__version_map[version]
+        return None
 
     def add_branch_version(self, branch: SchemaVersion,
                            parent: SchemaBranch or SchemaVersionNumber or None):
@@ -421,7 +469,7 @@ class SchemaPackage(object):
         assert version not in self, (
             "Already added branch " + self.package + " : " + str(version))
 
-        if parent is not None or parent not in self:
+        if parent is not None and parent not in self:
             assert isinstance(parent, SchemaVersionNumber), (
                 "SchemaBranch objects should be created by the " +
                 "SchemaPackage")

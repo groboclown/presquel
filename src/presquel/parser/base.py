@@ -17,7 +17,10 @@ from collections import (Iterable)
 
 
 class BaseObjectBuilder(object):
-    def __init__(self, parser: SchemaParser):
+    def __init__(self, parser: object):
+        """
+        :type parser: SchemaParser
+        """
         assert isinstance(parser, SchemaParser)
         object.__init__(self)
         self._parser = parser
@@ -122,8 +125,11 @@ class BaseObjectBuilder(object):
 
 
 class NameSpaceObjectBuilder(BaseObjectBuilder):
-    def __init__(self, parser: SchemaParser, name_keys, change_type,
+    def __init__(self, parser: object, name_keys, change_type,
                  is_readonly: bool):
+        """
+        :type parser: SchemaParser
+        """
         BaseObjectBuilder.__init__(self, parser)
         self.catalog_name = None
         self.schema_name = None
@@ -235,12 +241,13 @@ class SchemaParser(object):
         """
         raise NotImplementedError()
 
-    def parse(self, source, stream) -> list(Change or SchemaObject):
+    def parse(self, source: str, stream) -> list:
         """
         Parses the input stream, and returns a list of top-level Change
         instances and SchemaObject values.
 
         :param stream: Python stream type
+        :rtype: list[Change or SchemaObject]
         """
         self.__problems = []
         self.__current_source = source
@@ -255,11 +262,14 @@ class SchemaParser(object):
             self.__problems = None
         return ret
 
-    def _parse_stream(self, stream) -> list(Change or SchemaObject):
+    def _parse_stream(self, stream) -> list:
+        """
+        :rtype: list[Change or SchemaObject]
+        """
         raise NotImplementedError()
 
     @property
-    def source(self):
+    def source(self) -> str:
         return self.__current_source
 
     def next_order(self, source=None):
@@ -297,14 +307,14 @@ class SchemaParser(object):
         ret.extend(self.__source_order[source])
         return ret
 
-    def _parse_dict(self, file_dict) -> list(Change or SchemaObject):
+    def _parse_dict(self, file_dict: dict) -> list:
         """
         Takes a dictionary of values, similar to a JSon object, and returns
         the parsed schema values.  Used only for the top-level dictionary.
 
         :param file_dict: dictionary with string keys, and values of lists,
             strings, numerics, nulls, or dictionaries.
-        :return:
+        :rtype: list[Change or SchemaObject]
         """
         if not isinstance(file_dict, dict):
             self.problem("top level must be a dictionary", FATAL_TYPE)

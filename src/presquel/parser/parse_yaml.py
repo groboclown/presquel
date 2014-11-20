@@ -1,8 +1,8 @@
 
 from .base import SchemaParser
-import yaml
+from yaml import load as load_yaml
 
 
 class YamlSchemaParser(SchemaParser):
-    def _parse_stream(self, source, stream):
-        return self._parse_dict(yaml.load(stream))
+    def _parse_stream(self, stream):
+        return self._parse_dict(load_yaml(stream))

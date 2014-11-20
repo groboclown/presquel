@@ -11,7 +11,10 @@ class PrepSqlConverter(object):
     Manages the conversion of a model SqlArgument into a prepared statement
     string argument.
     """
-    def __init__(self, language: str, platforms: tuple(str)):
+    def __init__(self, language: str, platforms: tuple):
+        """
+        :type platforms: tuple[str]
+        """
         object.__init__(self)
         assert isinstance(language, str)
         assert isinstance(platforms, list) or isinstance(platforms, tuple)
@@ -30,11 +33,11 @@ class PrepSqlConverter(object):
         return self.__language
 
     @property
-    def platforms(self) -> tuple(str):
+    def platforms(self) -> tuple:
         """
         List of SQL platforms tha this converter uses.
 
-        :return list(str):
+        :rtype: tuple[str]:
         """
         return self.__platforms
 

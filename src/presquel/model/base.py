@@ -50,6 +50,20 @@ class Order(object):
         return self - other >= 0
 
 
+class SchemaObjectType(object):
+    """
+    Describes the kind of schema object.  Should be considered an enum.
+    """
+
+    def __init__(self, name):
+        object.__init__(self)
+        self.__name = name
+
+    @property
+    def name(self):
+        return self.__name
+
+
 class BaseObject(object):
     """
     Base schema object, used by changes and schema definitions for user
@@ -93,19 +107,6 @@ class BaseObject(object):
     def __ge__(self, change):
         assert isinstance(change, BaseObject)
         return self.order >= change.order
-
-
-class SchemaObjectType(object):
-    """
-    Describes the kind of schema object.  Should be considered an enum.
-    """
-    def __init__(self, name):
-        object.__init__(self)
-        self.__name = name
-
-    @property
-    def name(self):
-        return self.__name
 
 
 class SqlString(object):

@@ -116,68 +116,197 @@ class UpgradeAnalysis(object):
                         'can only add due to no previous version found'))
 
     @property
-    def before(self) -> tuple(SchemaObject):
+    def before(self) -> tuple or None:
         """
         The version of the object before upgrade.
 
-        :return: None or SchemaObject
+        :rtype: None or tuple[SchemaObject]
         """
         return self.__before
 
     @property
-    def after(self) -> tuple(SchemaObject or Change):
+    def after(self) -> tuple:
         """
         The version of the object after upgrading.
 
-        :return: None or SchemaObject
+        :rtype: None or tuple[SchemaObject or Change]
         """
         return self.__after
 
     @property
-    def change_categories(self) -> dict(ChangeType, list(Change)):
+    def change_categories(self) -> dict:
         """
         All the top-level changes defined by after, sorted by change type.
 
         If the "after" object has sub-schema, those may have their own changes.
 
-        :return: map(ChangeType -> list of Change)
+        :rtype: dict[ChangeType, list[Change]]
         """
         return self.__changes
 
     @property
-    def errors(self) -> tuple(UpgradeAnalysisProblem):
+    def errors(self) -> tuple:
         """
         Errors in the upgrade definition.
 
-        :return: tuple of UpgradeAnalysisProblem
+        :rtype: tuple[UpgradeAnalysisProblem]
         """
         return tuple(self._errors)
 
     @property
-    def warnings(self) -> tuple(UpgradeAnalysisProblem):
+    def warnings(self) -> tuple:
         """
         Warnings in the upgrade definition.
 
-        :return: tuple of UpgradeAnalysisProblem
+        :rtype: tuple[UpgradeAnalysisProblem]
         """
         return tuple(self._warnings)
 
     @property
-    def incompatible(self) -> tuple(Change):
+    def incompatible(self) -> tuple:
         """
         Changes that could potentially cause incompatibility on the software
         side.
 
-        :return:
+        :rtype: tuple[Change]
         """
         return tuple(self._incompatible)
 
     @property
-    def constraint_changes(self) -> tuple(Constraint):
+    def constraint_changes(self) -> tuple:
         """
         Change set for all the constraints.
+
+        :rtype: tuple[Constraint]
         """
         return self.__constraint_changes
+
+
+class SchemaUpgradedSet(object):
+    """
+    Matches the upgrade for a set of schema objects.  This only makes sense
+    for top-level objects and columns.
+    """
+
+    def __init__(self, before_set, after_set):
+        object.__init__(self)
+
+        before_names = {}
+        upgrades = []
+        self.__errors = []
+        duplicate_names = []
+        stand_alone_changes = []
+
+        for obj in before_set:
+            # These must all be schema objects
+            assert isinstance(obj, SchemaObject)
+            if obj.full_name in before_names:
+                self.__errors.append(
+                    UpgradeAnalysisProblem(obj, 'duplicate name'))
+                if before_names[obj.full_name] not in duplicate_names:
+                    self.__errors.append(UpgradeAnalysisProblem(
+                        before_names[obj.full_name], 'duplicate name'))
+            else:
+                before_names[obj.full_name] = obj
+
+        for obj in after_set:
+            if isinstance(obj, SchemaChange):
+                if obj.change_type == REMOVE_CHANGE:
+                    if obj.previous_name in before_names:
+                        upgrades.append(
+                            SchemaUpgradedSet._create_upgrade_schema(
+                                before_names[obj.previous_name], obj))
+                        del before_names[obj.previous_name]
+                    else:
+                        self.__errors.append(UpgradeAnalysisProblem(
+                            obj, 'remove change has no known previous object'))
+                else:
+                    # Should this look at "affects"?
+                    stand_alone_changes.append(obj)
+            elif isinstance(obj, SqlChange):
+                # Should this look at "affects"?
+                stand_alone_changes.append(obj)
+            elif isinstance(obj, SchemaObject):
+                change_types = _categorize_changes(obj.changes)
+                name = obj.full_name
+                if len(change_types[RENAME_CHANGE]) > 0:
+                    # more than one is an error, but we're not checking that now
+                    name = change_types[RENAME_CHANGE][0].previous_name
+
+                if name in before_names:
+                    before = before_names[name]
+                    upgrades.append(
+                        SchemaUpgradedSet._create_upgrade_schema(before, obj))
+                    del before_names[name]
+                else:
+                    upgrades.append(
+                        SchemaUpgradedSet._create_upgrade_schema(None, obj))
+            else:
+                assert False, "invalid object " + repr(obj)
+
+        for before in before_names.values():
+            upgrades.append(
+                SchemaUpgradedSet._create_upgrade_schema(before, None))
+
+        self.__upgrades = tuple(upgrades)
+        self.__stand_alone_changes = tuple(stand_alone_changes)
+
+    @property
+    def errors(self) -> list:
+        """
+        List of issues with the set of changes.
+
+        :rtype: list[UpgradeAnalysisProblem]
+        """
+        return self.__errors
+
+    @property
+    def stand_alone_changes(self) -> list:
+        """
+        A list of changes that have no corresponding previous object.
+
+        :rtype: list[Change]
+        """
+        return self.__stand_alone_changes
+
+    @property
+    def upgrades(self) -> list:
+        """
+        A list of UpgradeAnalysis objects
+
+        :rtype: list[UpgradeAnalysis]
+        """
+        return self.__upgrades
+
+    @staticmethod
+    def _create_upgrade_schema(before, after) -> UpgradeAnalysis:
+        if before is None:
+            assert isinstance(after, SchemaObject)
+
+            if isinstance(after, Table):
+                return TableUpgradeAnalysis(None, after)
+            if isinstance(after, View):
+                return ViewUpgradeAnalysis(None, after)
+            if isinstance(after, Column):
+                return ColumnUpgradeAnalysis(None, after)
+
+            raise Exception("Don't know how to upgrade a " +
+                            after.object_type + " (" + str(after) + ")")
+        elif after is None:
+            assert isinstance(before, SchemaObject)
+
+            if isinstance(before, Table):
+                return TableUpgradeAnalysis(before, None)
+            if isinstance(before, View):
+                return ViewUpgradeAnalysis(before, None)
+            if isinstance(before, Column):
+                return ColumnUpgradeAnalysis(before, None)
+
+            raise Exception("Don't know how to remove a " +
+                            before.object_type + " (" + str(before) + ")")
+        else:
+            # FIXME
+            pass
 
 
 class IncompatibleUpgradeAnalysis(UpgradeAnalysis):
@@ -289,132 +418,12 @@ class ColumnUpgradeAnalysis(UpgradeAnalysis):
             pass
 
 
-class SchemaUpgradedSet(object):
-    """
-    Matches the upgrade for a set of schema objects.  This only makes sense
-    for top-level objects and columns.
-    """
-    def __init__(self, before_set, after_set):
-        object.__init__(self)
-
-        before_names = {}
-        upgrades = []
-        self.__errors = []
-        duplicate_names = []
-        stand_alone_changes = []
-
-        for obj in before_set:
-            # These must all be schema objects
-            assert isinstance(obj, SchemaObject)
-            if obj.full_name in before_names:
-                self.__errors.append(
-                    UpgradeAnalysisProblem(obj, 'duplicate name'))
-                if before_names[obj.full_name] not in duplicate_names:
-                    self.__errors.append(UpgradeAnalysisProblem(
-                        before_names[obj.full_name], 'duplicate name'))
-            else:
-                before_names[obj.full_name] = obj
-
-        for obj in after_set:
-            if isinstance(obj, SchemaChange):
-                if obj.change_type == REMOVE_CHANGE:
-                    if obj.previous_name in before_names:
-                        upgrades.append(
-                            SchemaUpgradedSet._create_upgrade_schema(
-                                before_names[obj.previous_name], obj))
-                        del before_names[obj.previous_name]
-                    else:
-                        self.__errors.append(UpgradeAnalysisProblem(
-                            obj, 'remove change has no known previous object'))
-                else:
-                    # Should this look at "affects"?
-                    stand_alone_changes.append(obj)
-            elif isinstance(obj, SqlChange):
-                # Should this look at "affects"?
-                stand_alone_changes.append(obj)
-            elif isinstance(obj, SchemaObject):
-                change_types = _categorize_changes(obj.changes)
-                name = obj.full_name
-                if len(change_types[RENAME_CHANGE]) > 0:
-                    # more than one is an error, but we're not checking that now
-                    name = change_types[RENAME_CHANGE][0].previous_name
-
-                if name in before_names:
-                    before = before_names[name]
-                    upgrades.append(
-                        SchemaUpgradedSet._create_upgrade_schema(before, obj))
-                    del before_names[name]
-                else:
-                    upgrades.append(
-                        SchemaUpgradedSet._create_upgrade_schema(None, obj))
-            else:
-                assert False, "invalid object " + repr(obj)
-
-        for before in before_names.values():
-            upgrades.append(
-                SchemaUpgradedSet._create_upgrade_schema(before, None))
-
-        self.__upgrades = tuple(upgrades)
-        self.__stand_alone_changes = tuple(stand_alone_changes)
-
-    @property
-    def errors(self) -> list(UpgradeAnalysisProblem):
-        """
-        List of issues with the set of changes.
-        """
-        return self.__errors
-
-    @property
-    def stand_alone_changes(self) -> list(Change):
-        """
-        A list of changes that have no corresponding previous object.
-        """
-        return self.__stand_alone_changes
-
-    @property
-    def upgrades(self) -> list(UpgradeAnalysis):
-        """
-        A list of UpgradeAnalysis objects
-        """
-        return self.__upgrades
-
-    @staticmethod
-    def _create_upgrade_schema(before, after) -> UpgradeAnalysis:
-        if before is None:
-            assert isinstance(after, SchemaObject)
-
-            if isinstance(after, Table):
-                return TableUpgradeAnalysis(None, after)
-            if isinstance(after, View):
-                return ViewUpgradeAnalysis(None, after)
-            if isinstance(after, Column):
-                return ColumnUpgradeAnalysis(None, after)
-
-            raise Exception("Don't know how to upgrade a " +
-                            after.object_type + " (" + str(after) + ")")
-        elif after is None:
-            assert isinstance(before, SchemaObject)
-
-            if isinstance(before, Table):
-                return TableUpgradeAnalysis(before, None)
-            if isinstance(before, View):
-                return ViewUpgradeAnalysis(before, None)
-            if isinstance(before, Column):
-                return ColumnUpgradeAnalysis(before, None)
-
-            raise Exception("Don't know how to remove a " +
-                            before.object_type + " (" + str(before) + ")")
-        else:
-            # FIXME
-            pass
-
-
-def _categorize_changes(changes: tuple(Change)):
+def _categorize_changes(changes: tuple or list) -> dict:
     """
     Organize the list of changes by grouping them into change types.
 
-    :param changes:
-    :return:
+    :type changes: tuple[Change] or list[Change]
+    :rtype: dict[ChangeType, list[Change]]
     """
     ret = {}
     for change_type in CHANGE_TYPES:

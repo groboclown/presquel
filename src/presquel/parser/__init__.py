@@ -17,4 +17,4 @@ PARSERS_BY_EXTENSION = {
 }
 
 # This needs to be defined after the parsers
-from .file_loader import *
+from .file_loader import load_package

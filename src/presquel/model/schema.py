@@ -4,13 +4,15 @@ Describes the current schema for the database version.
 
 from .base import (BaseObject, TABLE_TYPE, COLUMN_TYPE, VIEW_TYPE,
                    CONSTRAINT_TYPE, SEQUENCE_TYPE, PROCEDURE_TYPE,
-                   SqlSet, LanguageSet)
+                   SqlSet, LanguageSet, Order)
 
 
 class SchemaObject(BaseObject):
     """Generic parent for all schema definition objects."""
     def __init__(self, name, order, comment, object_type, changes,
-                 full_name = None):
+                 full_name=None):
+        if not isinstance(order, Order):
+            order = Order(order)
         BaseObject.__init__(self, order, comment, object_type)
         self.__object_type = object_type
         self.__changes = changes or []
