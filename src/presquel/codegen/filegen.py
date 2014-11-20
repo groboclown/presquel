@@ -94,7 +94,6 @@ class FileGen(object):
         assert isinstance(lang_gen, LanguageGenerator)
         self.lang_gen = lang_gen
 
-
     def generate_file(self, config):
         """
         Create the output file for the given analysis object configuration.
@@ -102,8 +101,9 @@ class FileGen(object):
         assert isinstance(config, GenConfig)
         config.validate()
 
-        file_name = os.path.join(config.output_dir,
-             self.lang_gen.generate_filename(config))
+        file_name = os.path.join(
+            config.output_dir,
+            self.lang_gen.generate_filename(config))
         if os.path.exists(file_name) and config.fail_if_file_exists:
             raise Exception("Will not overwrite " + file_name)
 

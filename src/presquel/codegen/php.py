@@ -61,13 +61,13 @@ class PhpGenConfig(GenConfig):
     values, so that it doesn't need repeating within the language generator.
     """
 
-    def __init__(self, analysis_obj, output_dir = None, platforms = None,
-            prep_sql_converter = None, namespace = None, parent_class = None):
+    def __init__(self, analysis_obj, output_dir=None, platforms=None,
+                 prep_sql_converter=None, namespace=None, parent_class=None):
         """
         Creates the new PHP instance of the config.
         """
         GenConfig.__init__(self, analysis_obj, output_dir, platforms,
-            prep_sql_converter)
+                           prep_sql_converter)
 
         self.namespace = namespace
         self.parent_class = parent_class

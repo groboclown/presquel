@@ -152,10 +152,10 @@ if __name__ == '__main__':
 
     for setup in sources:
         os.makedirs(setup.out_dir)
-        version = setup.branch.branch
-        order_length = find_max_order_len(-1, version.schema)
+        branch_version = setup.branch.branch
+        order_length = find_max_order_len(-1, branch_version.schema)
         name_format = ('{0:0' + str(order_length) + 'd}_{1}.sql')
-        for schema in version.schema:
+        for schema in branch_version.schema:
             filename = os.path.join(
                 setup.out_dir, name_format.format(
                     schema.order.items()[0], schema.name))
