@@ -12,7 +12,7 @@ but instead produces scripts that can be used.
 
 from .base import *
 from .mysql import *
-
+from .upgrade import *
 
 GENERATORS = (MySqlScriptGenerator(), )
 

@@ -1,0 +1,9 @@
+
+change:
+    type: sql
+    sql: "
+    INSERT INTO PRODUCT
+        (Product_Sku)
+        SELECT Product_Sku
+            FROM PRICE
+    "

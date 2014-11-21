@@ -257,6 +257,21 @@ class SchemaVersion(object):
         """
         return self.__schema
 
+    def all_changes(self) -> list:
+        """
+        list of both the top changes and the schema that were changed,
+        correctly ordered.
+
+        :rtype: list[SchemaObject or Change]
+        """
+        ret = [self.top_changes]
+        for obj in self.schema:
+            assert isinstance(obj, SchemaObject)
+            if obj.has_any_changes():
+                ret.append(obj)
+        ret.sort()
+        return ret
+
     # FIXME remove these once the corresponding checking code is removed
     def __lt__(self, version):
         raise Exception("compare version numbers instead")
@@ -321,7 +336,7 @@ class SchemaBranch(object):
         return self.__branch is not None
 
     @property
-    def branch(self) -> SchemaVersion:
+    def schema_version(self) -> SchemaVersion:
         if self.__branch is None:
             branch = self.__branch_loader(self.version)
             assert isinstance(branch, SchemaVersion)
@@ -333,7 +348,11 @@ class SchemaBranch(object):
         return self.__version
 
     @property
-    def parent(self) -> None or SchemaVersion:
+    def parent(self) -> None or object:
+        """
+
+        :rtype: SchemaBranch or None
+        """
         return self.__parent
 
     @property

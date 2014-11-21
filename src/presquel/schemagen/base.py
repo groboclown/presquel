@@ -2,9 +2,13 @@
 Base classes used for the generation of code based on the model objects.
 """
 
+from ..model.base import (SqlSet)
 from ..model.schema import (SchemaObject, View, Table, Sequence, Procedure)
 from ..model.change import (Change, SqlChange)
-from .upgrade import (UpgradeAnalysis)
+from .upgrade import (
+    UpgradeAnalysis, TableUpgradeAnalysis, ViewUpgradeAnalysis,
+    SequenceUpgradeAnalysis, ProcedureUpgradeAnalysis
+)
 
 
 class SchemaScriptGenerator(object):
@@ -16,21 +20,24 @@ class SchemaScriptGenerator(object):
     def __init__(self):
         object.__init__(self)
 
-    def is_platform(self, platforms):
+    def is_platform(self, platforms: list or tuple) -> bool:
         """
         Checks if this generator is one of the supported platform grammars.
         The "platforms" variable is produced by the Change.platforms property.
 
-        :param platforms:
-        :return: boolean
+        :type platforms: list[str] or tuple[str]
+        :rtype: boolean
         """
         raise NotImplementedError("not implemented")
 
-    def generate_base(self, top_object):
+    def _get_sql_for_platform(self, sql_set: SqlSet) -> str:
+        raise NotImplementedError()
+
+    def generate_base(self, top_object) -> list:
         """
 
         :param top_object:
-        :return: list(str)
+        :rtype: list[str]
         """
         if isinstance(top_object, SchemaObject):
             return self._generate_base_schema(top_object)
@@ -41,28 +48,25 @@ class SchemaScriptGenerator(object):
         else:
             raise Exception("Cannot generate schema with " + str(top_object))
 
-    def generate_upgrade(self, top_object, previous_version):
+    def generate_upgrade(self, change: UpgradeAnalysis or SqlChange) -> list:
         """
-
-        :param top_object:
-        :return: list(str)
+        :rtype: list[str]
         """
-        if isinstance(top_object, SchemaObject):
-            return self._generate_upgrade_schema(top_object, previous_version)
-        elif isinstance(top_object, SqlChange):
-            assert previous_version is None
-            return self._generate_upgrade_sqlchange(top_object)
+        if isinstance(change, SqlChange):
+            return self._generate_upgrade_sqlchange(change)
+        elif isinstance(change, UpgradeAnalysis):
+            return self._generate_upgrade_schema(change)
         else:
             raise Exception("Cannot generate upgrade schema with " +
-                            str(top_object))
+                            str(change))
 
-    def _generate_base_schema(self, top_object):
+    def _generate_base_schema(self, top_object) -> list:
         """
         Generates the "creation" script for a given schema object.  It does
         not produce the upgrade script.
 
         :param top_object:
-        :return: list(str)
+        :rtype: list[str]
         """
         if isinstance(top_object, Table):
             return self._generate_base_table(top_object)
@@ -75,61 +79,63 @@ class SchemaScriptGenerator(object):
         else:
             raise Exception("unknown schema " + str(top_object))
 
-    def _generate_upgrade_schema(self, top_object):
+    def _generate_upgrade_schema(self, change: UpgradeAnalysis) -> list:
         """
         Generate the upgrade schema for a SchemaObject.
 
-        :param top_object:
-        :return: list(str)
+        :rtype: list[str]
         """
-        if isinstance(top_object, Table):
-            return self._generate_upgrade_table(top_object)
-        elif isinstance(top_object, View):
-            return self._generate_upgrade_view(top_object)
-        elif isinstance(top_object, Sequence):
-            return self._generate_upgrade_sequence(top_object)
-        elif isinstance(top_object, Procedure):
-            return self._generate_upgrade_procedure(top_object)
-        else:
-            raise Exception("unknown schema " + str(top_object))
+        if not change.has_changes():
+            return []
 
-    def _generate_base_table(self, table):
+        if isinstance(change, TableUpgradeAnalysis):
+            return self._generate_upgrade_table(change)
+        elif isinstance(change, ViewUpgradeAnalysis):
+            return self._generate_upgrade_view(change)
+        elif isinstance(change, SequenceUpgradeAnalysis):
+            return self._generate_upgrade_sequence(change)
+        elif isinstance(change, ProcedureUpgradeAnalysis):
+            return self._generate_upgrade_procedure(change)
+        else:
+            raise Exception("unknown schema " + str(change))
+
+    def _generate_base_table(self, table: Table) -> list:
         """
         Generate the creation script for a Table.
 
         :param table:
-        :return: list(str)
+        :rtype: list[str]
         """
         raise NotImplementedError("not implemented")
 
-    def _generate_base_view(self, view):
+    def _generate_base_view(self, view: View) -> list:
         """
         Generate the creation script for a View.
 
         :param view:
-        :return: list(str)
+        :rtype: list[str]
         """
         raise NotImplementedError("not implemented")
 
-    def _generate_base_sequence(self, sequence):
+    def _generate_base_sequence(self, sequence: Sequence) -> list:
         """
         Generate the creation script for a Sequence.
 
         :param sequence:
-        :return: list(str)
+        :rtype: list[str]
         """
         raise NotImplementedError("not implemented")
 
-    def _generate_base_procedure(self, procedure):
+    def _generate_base_procedure(self, procedure: Procedure) -> list:
         """
         Generate the creation script for a Procedure.
 
         :param procedure:
-        :return: list(str)
+        :rtype: list[str]
         """
         raise NotImplementedError("not implemented")
 
-    def _generate_upgrade_sqlchange(self, sql_change):
+    def _generate_upgrade_sqlchange(self, sql_change: SqlChange) -> list:
         """
         Generates the upgrade sql for a SqlChange object.  This can be called
         if the platforms don't match.
@@ -137,25 +143,28 @@ class SchemaScriptGenerator(object):
         Default implementation just returns the sql text.
 
         :param sql_change:
-        :return: list(str)
+        :rtype: list[str]
         """
-        if self.is_platform(sql_change.platforms):
-            return [sql_change.sql]
+        if self.is_platform(sql_change.sql_set.platforms):
+            return [self._get_sql_for_platform(sql_change.sql_set)]
         else:
             return []
 
-    def _generate_upgrade_table(self, table):
+    def _generate_upgrade_table(self, table: TableUpgradeAnalysis):
         """
         Generate the upgrade script for a Table.
 
         :param table:
-        :return: list(str)
+        :rtype: list[str]
         """
+
+        # Need to be careful here.  Constraint removal needs to happen first,
+        # followed by column removal, then column rename, then column add,
+        # then the remaining constraint changes.
+
         ret = []
-        for top_change in table.changes:
+        for top_change in table.change_categories.values():
             ret.extend(self._generate_upgrade_table_change(table, top_change))
-
-
 
         for constraint in table.constraints:
             for change in constraint.changes:
@@ -164,35 +173,38 @@ class SchemaScriptGenerator(object):
 
         raise NotImplementedError("not implemented")
 
-    def _generate_upgrade_table_change(self, table, change):
+    def _generate_upgrade_table_change(
+            self, table: TableUpgradeAnalysis, change: Change):
         raise NotImplementedError("not implemented")
 
     def _generate_upgrade_table_constraint(self, table, constraint, change):
         raise NotImplementedError("not implemented")
 
-    def _generate_upgrade_view(self, view):
+    def _generate_upgrade_view(self, view: ViewUpgradeAnalysis) -> list:
         """
         Generate the upgrade script for a View.
 
         :param view:
-        :return: list(str)
+        :rtype: list[str]
         """
         raise NotImplementedError("not implemented")
 
-    def _generate_upgrade_sequence(self, sequence):
+    def _generate_upgrade_sequence(
+            self, sequence: SequenceUpgradeAnalysis) -> list:
         """
         Generate the upgrade script for a Sequence.
 
         :param sequence:
-        :return: list(str)
+        :rtype: list[str]
         """
         raise NotImplementedError("not implemented")
 
-    def _generate_upgrade_procedure(self, procedure):
+    def _generate_upgrade_procedure(
+            self, procedure: ProcedureUpgradeAnalysis) -> list:
         """
         Generate the upgrade script for a Procedure.
 
         :param procedure:
-        :return: list(str)
+        :rtype: list[str]
         """
         raise NotImplementedError("not implemented")

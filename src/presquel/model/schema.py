@@ -15,7 +15,7 @@ class SchemaObject(BaseObject):
             order = Order(order)
         BaseObject.__init__(self, order, comment, object_type)
         self.__object_type = object_type
-        self.__changes = changes or []
+        self.__changes = tuple(changes or [])
         self.__name = name
         self.__full_name = full_name or name
 
@@ -34,23 +34,23 @@ class SchemaObject(BaseObject):
         return self.__full_name
 
     @property
-    def changes(self):
+    def changes(self) -> tuple:
         """
         The changes that need to be applied to this object to upgrade it from
         the previous version.  If there were no changes, or this is the first
         time this object exists, then there will be no changes.
 
-        :return: tuple(Change)
+        :rtype: tuple[Change]
         """
         return self.__changes
 
     @property
-    def sub_schema(self):
+    def sub_schema(self) -> tuple:
         """
         Returns the sub-schema objects for the object this represents.  This
         allows for access into the sub-object changes.
 
-        :return: tuple(SchemaObject)
+        :rtype: tuple[SchemaObject]
         """
         return []
 
@@ -72,6 +72,18 @@ class SchemaObject(BaseObject):
                 part = ""
             part_list.append(part)
         return ".".join(part_list)
+
+    def has_any_changes(self) -> bool:
+        """
+        Recursively looks deep into the object to see if there are any parts
+        that contain changes.
+        """
+        if len(self.__changes) > 0:
+            return True
+        for obj in self.sub_schema:
+            if obj.has_any_changes():
+                return True
+        return False
 
 
 class ValueTypeValue(object):

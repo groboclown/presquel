@@ -2,13 +2,14 @@
 Inspects the schema between a previous and a current version.
 """
 
-from ..model.base import (VIEW_TYPE, TABLE_TYPE, COLUMN_TYPE)
+from ..model.base import (VIEW_TYPE, TABLE_TYPE, COLUMN_TYPE, Order)
 from ..model.schema import (
     SchemaObject, Column, Table, View, Constraint, ColumnarSchemaObject)
 from ..model.change import (
     Change, SchemaChange, SqlChange, REMOVE_CHANGE,
     ADD_CHANGE, RENAME_CHANGE, ALTER_CHANGE, SQL_CHANGE, CHANGE_TYPES,
     ChangeType)
+from ..model.version import (SchemaBranch, SchemaVersion)
 
 
 class UpgradeAnalysisProblem(object):
@@ -116,6 +117,21 @@ class UpgradeAnalysis(object):
                         'can only add due to no previous version found'))
 
     @property
+    def name(self) -> str:
+        if self.__after is not None and isinstance(self.__after, SchemaObject):
+            return self.__after.name
+        if self.__before is not None:
+            return self.__before.name
+        return "change"
+
+    @property
+    def order(self) -> Order:
+        if self.__after is None:
+            # shouldn't happen, but just in case
+            return self.__before.order
+        return self.__after.order
+
+    @property
     def before(self) -> tuple or None:
         """
         The version of the object before upgrade.
@@ -181,6 +197,32 @@ class UpgradeAnalysis(object):
         """
         return self.__constraint_changes
 
+    def has_changes(self) -> bool:
+        """
+        Does this upgrade have any changes?
+        """
+        return (
+            len(self.__constraint_changes) > 0 or
+            len(self.__changes) > 0
+        )
+
+    # Sort support
+    def __lt__(self, upgrade):
+        assert isinstance(upgrade, UpgradeAnalysis)
+        return self.order < upgrade.order
+
+    def __le__(self, upgrade):
+        assert isinstance(upgrade, UpgradeAnalysis)
+        return self.order <= upgrade.order
+
+    def __gt__(self, upgrade):
+        assert isinstance(upgrade, UpgradeAnalysis)
+        return self.order > upgrade.order
+
+    def __ge__(self, upgrade):
+        assert isinstance(upgrade, UpgradeAnalysis)
+        return self.order >= upgrade.order
+
 
 class SchemaUpgradedSet(object):
     """
@@ -194,6 +236,7 @@ class SchemaUpgradedSet(object):
         before_names = {}
         upgrades = []
         self.__errors = []
+        self.__warnings = []
         duplicate_names = []
         stand_alone_changes = []
 
@@ -234,6 +277,8 @@ class SchemaUpgradedSet(object):
                     name = change_types[RENAME_CHANGE][0].previous_name
 
                 if name in before_names:
+                    # FIXME if there are no differences, this shouldn't
+                    # be included
                     before = before_names[name]
                     upgrades.append(
                         SchemaUpgradedSet._create_upgrade_schema(before, obj))
@@ -247,6 +292,8 @@ class SchemaUpgradedSet(object):
         for before in before_names.values():
             upgrades.append(
                 SchemaUpgradedSet._create_upgrade_schema(before, None))
+            self.__warnings.append(UpgradeAnalysisProblem(
+                before, 'no explicit removal for ' + before.name))
 
         self.__upgrades = tuple(upgrades)
         self.__stand_alone_changes = tuple(stand_alone_changes)
@@ -259,6 +306,25 @@ class SchemaUpgradedSet(object):
         :rtype: list[UpgradeAnalysisProblem]
         """
         return self.__errors
+
+    @property
+    def warnings(self) -> list:
+        """
+
+        :rtype: list[UpgradeAnalysisProblem]
+        """
+        return self.__warnings
+
+    def has_changes(self) -> bool:
+        """
+        Does this upgrade have any changes?
+        """
+        if len(self.__stand_alone_changes) > 0:
+            return True
+        for upg in self.__upgrades:
+            if upg.has_changes():
+                return True
+        return False
 
     @property
     def stand_alone_changes(self) -> list:
@@ -277,6 +343,18 @@ class SchemaUpgradedSet(object):
         :rtype: list[UpgradeAnalysis]
         """
         return self.__upgrades
+
+    @property
+    def all_upgrades(self) -> list:
+        """
+        All upgrades and stand-alone changes, sorted by order
+
+        :rtype: list[UpgradeAnalysis or Change]
+        """
+        ret = [self.__stand_alone_changes]
+        ret.extend(self.__upgrades)
+        ret.sort(key='order')
+        return ret
 
     @staticmethod
     def _create_upgrade_schema(before, after) -> UpgradeAnalysis:
@@ -309,6 +387,63 @@ class SchemaUpgradedSet(object):
             pass
 
 
+class BranchUpgradeAnalysis(object):
+    """
+    Analyzes a SchemaBranch to find all the changed schema objects and changes.
+
+    """
+
+    def __init__(self, branch: SchemaBranch):
+        object.__init__(self)
+
+        assert isinstance(branch, SchemaBranch)
+
+        self.__problems = []
+
+        self.__schema_version = branch.schema_version
+        self.__parent_branch = self.__schema_version.parent
+        self.__parent_version = None
+        self.__upgrade_set = None
+        if self.__parent_branch is not None:
+            self.__parent_version = self.__parent_branch.schema_version
+            all_new_values = [self.__schema_version.top_changes]
+            all_new_values.extend(self.__schema_version.schema)
+            self.__upgrade_set = SchemaUpgradedSet(
+                self.__parent_version, all_new_values)
+
+            # FIXME need a way to determine if there are no changes.
+
+    @property
+    def is_upgrade(self) -> bool:
+        """
+        Returns True if there is actually an upgrade to perform.  It will
+        return False if there is no parent version, or if there wasn't any
+        change from the parent version.
+        """
+        return self.__upgrade_set is not None
+
+    @property
+    def changes(self) -> list:
+        """
+        :rtype: list[UpgradeAnalysis or SqlChange]
+        """
+        if not self.is_upgrade:
+            return []
+        return self.__upgrade_set.all_upgrades
+
+    @property
+    def current_version(self) -> SchemaVersion:
+        return self.__schema_version
+
+    @property
+    def previous_version(self) -> SchemaVersion or None:
+        return self.__parent_version
+
+    @property
+    def upgrade_set(self) -> SchemaUpgradedSet or None:
+        return self.__upgrade_set
+
+
 class IncompatibleUpgradeAnalysis(UpgradeAnalysis):
     """
     An upgrade that simply won't work, such as renaming a table into a
@@ -320,6 +455,12 @@ class IncompatibleUpgradeAnalysis(UpgradeAnalysis):
         UpgradeAnalysis.__init__(self, before, after)
         self._errors.append(UpgradeAnalysisProblem(after,
                             'incompatible upgrade'))
+
+    def has_changes(self) -> bool:
+        """
+        Does this upgrade have any changes?
+        """
+        return True
 
 
 class ColumnarUpgradeAnalysis(UpgradeAnalysis):
@@ -348,6 +489,15 @@ class ColumnarUpgradeAnalysis(UpgradeAnalysis):
         self.__column_upgrades = column_upgrades
 
         # FIXME match top-changes with other metadata.
+
+    def has_changes(self) -> bool:
+        """
+        Does this upgrade have any changes?
+        """
+        return (
+            UpgradeAnalysis.has_changes(self) or
+            self.__column_upgrades.has_changes()
+        )
 
     @property
     def column_upgrade_set(self) -> SchemaUpgradedSet:
@@ -414,8 +564,24 @@ class ColumnUpgradeAnalysis(UpgradeAnalysis):
 
         if after is SchemaChange or after is None:
             # implicit removal, due to parent class check
-            # FIXME do something with this
+            # FIXME do something with this, like add a removal change
             pass
+
+
+class SequenceUpgradeAnalysis(UpgradeAnalysis):
+    def __init__(self, before: SchemaObject or None,
+                 after: SchemaObject or Change or None):
+        UpgradeAnalysis.__init__(self, before, after)
+
+        raise NotImplementedError()
+
+
+class ProcedureUpgradeAnalysis(UpgradeAnalysis):
+    def __init__(self, before: SchemaObject or None,
+                 after: SchemaObject or Change or None):
+        UpgradeAnalysis.__init__(self, before, after)
+
+        raise NotImplementedError()
 
 
 def _categorize_changes(changes: tuple or list) -> dict:

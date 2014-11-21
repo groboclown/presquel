@@ -24,7 +24,7 @@ if __name__ == '__main__':
     if head_version is None:
         print("no versions found")
         sys.exit(1)
-    branch = head_version.branch
+    branch = head_version.schema_version
     if len(branch.problems) > 0:
         print("Problems discovered for " + in_dir + ":")
         for problem in branch.problems:

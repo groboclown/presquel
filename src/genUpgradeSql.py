@@ -44,9 +44,11 @@ class SourceSetup(object):
         self.out_dir = None
         self.package = None
         self.branch = None
+        self.analysis = None
 
     def load(self):
         self.package = presquel.load_package(self.base_dir, self.package_name)
+        assert isinstance(self.package, presquel.model.SchemaPackage)
         for number in self.package.unresolved_branch_versions:
             self.problems.append(
                 "package references unknown version number " + str(number))
@@ -71,12 +73,24 @@ class SourceSetup(object):
                 )
 
         if self.branch is not None:
-            self.problems.extend([str(branch)
-                                  for branch in self.branch.schema_version.problems])
+            assert isinstance(self.branch, presquel.model.SchemaBranch)
+
+            self.analysis = presquel.BranchUpgradeAnalysis(self.branch)
+
+            if self.analysis.current_version is not None:
+                self.problems.extend([
+                    str(prb)
+                    for prb in self.analysis.current_version.problems])
+            if self.analysis.previous_version is not None:
+                self.problems.extend([
+                    "({}) {}".format(
+                        self.analysis.previous_version.version, str(prb))
+                    for prb in self.analysis.previous_version.problems])
 
     def set_output(self, output_dir: str, directories: bool, force: bool):
         if directories:
-            output_dir = os.path.join(output_dir, self.package_name)
+            output_dir = os.path.join(output_dir, self.package_name + '_v' +
+                                      str(self.branch.version))
 
         if os.path.exists(output_dir) and not os.path.isdir(output_dir):
             self.problems.append("output directory '" + output_dir +
@@ -87,6 +101,9 @@ class SourceSetup(object):
                                  "overwrite")
         else:
             self.out_dir = output_dir
+
+    def __str__(self):
+        return self.package_name
 
 
 if __name__ == '__main__':
@@ -139,7 +156,7 @@ if __name__ == '__main__':
             problems = True
             print("Problems discovered for " + source + ":")
             for problem in setup.problems:
-                print("[" + source + "] " + str(problem))
+                print("[{}] {}".format(source, problem))
         else:
             sources.append(setup)
 
@@ -149,14 +166,21 @@ if __name__ == '__main__':
     for setup in sources:
         assert isinstance(setup, SourceSetup)
         os.makedirs(setup.out_dir)
-        branch_version = setup.branch.schema_version
-        order_length = find_max_order_len(-1, branch_version.schema)
+        changes = setup.analysis.changes()
+        order_length = find_max_order_len(-1, changes)
         name_format = ('{0:0' + str(order_length) + 'd}_{1}.sql')
-        for schema in branch_version.schema:
+
+        for change in changes:
+            if isinstance(change, presquel.model.Change):
+                schema_name = "change"
+            elif isinstance(change, presquel.schemagen.UpgradeAnalysis):
+                schema_name = change.name
+            else:
+                assert False, "invalid type " + repr(change)
             filename = os.path.join(
                 setup.out_dir, name_format.format(
-                    schema.order.items()[0], schema.name))
+                    change.order.items()[0], schema_name))
             print("Generating " + filename)
             with open(filename, 'w') as f:
-                for script in gen.generate_base(schema):
+                for script in gen.generate_upgrade(change):
                     f.write(script)

@@ -1,0 +1,16 @@
+
+table:
+  name: PRODUCT
+  changes:
+  - change:
+      type: create
+  columns:
+  - column:
+      name: Product_Sku
+      type: nvarchar(255)
+      constraints:
+      - constraint:
+          type: not null
+      - constraint:
+          type: primary key
+          name: Product__Product_Sku__Key
