@@ -2,7 +2,7 @@
 Manages the different versions of the schema.
 """
 
-from .base import (BaseObject, SchemaObjectType)
+from .base import (BaseObject, SchemaObjectType, Order)
 from .schema import (SchemaObject)
 from .change import (Change)
 
@@ -22,7 +22,10 @@ class ErrorObject(BaseObject):
                  source_name: str, source_pos: str or None=None,
                  source_line: int or None=None, source_col: int or None=None,
                  level: SchemaObjectType=ERROR_TYPE):
-        BaseObject.__init__(self, source.order, comment, level)
+        order = Order([0, 0, 0])
+        if source is not None:
+            order = source.order
+        BaseObject.__init__(self, order, comment, level)
 
         assert isinstance(source, BaseObject) or source is None
         assert isinstance(source_name, str)
@@ -72,7 +75,7 @@ class ErrorObject(BaseObject):
         self.__source = source
 
     def __str__(self):
-        return "Error: " + " ; " + self.source_location
+        return "Error: {} ; {}".format(self.comment, self.source_location)
 
 
 class SchemaVersionNumber(object):

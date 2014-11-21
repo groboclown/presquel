@@ -4,7 +4,7 @@ from ..model.change import (
     ERROR_CHANGE_TYPE)
 from ..model.base import (
     SCHEMA_OBJECT_TYPES, TABLE_TYPE, VIEW_TYPE, CONSTRAINT_TYPE, COLUMN_TYPE,
-    SqlString, SqlArgument, BaseObject, SchemaObjectType)
+    SqlString, SqlArgument, BaseObject, SchemaObjectType, Order)
 from ..model.schema import (
     Table, View, SchemaObject,
     Column, SqlConstraint, LanguageConstraint, Constraint,
@@ -287,7 +287,7 @@ class SchemaParser(object):
             len(self.__source_order[source][1]) - 1,
             self.__source_order[source][1][-1]
         ]
-        return ret
+        return Order(ret)
 
     def next_explicit_order(self, order, source=None):
         """
@@ -373,9 +373,9 @@ class SchemaParser(object):
             if change_obj.parse(key, val):
                 # handled implicitly
                 pass
-            elif key == 'schema' or key == 'schematype':
+            elif key in ['schema', 'schematype', 'update', 'updates']:
                 schema_type = change_obj.to_schema_type(key, val)
-            elif key == 'change' or key == 'changetype':
+            elif key in ['changetype', 'type']:
                 change_type = change_obj.to_change_type(key, val)
             elif key == 'affects':
                 if isinstance(val, str):
@@ -553,9 +553,9 @@ class SchemaParser(object):
             if change_obj.parse(key, val):
                 # handled
                 pass
-            elif key in ['schema', 'schematype']:
+            elif key in ['schema', 'schematype', 'update', 'updates']:
                 schema_type = change_obj.to_schema_type(key, val)
-            elif key in ['change', 'changetype', 'type']:
+            elif key in ['changetype', 'type']:
                 change_type = change_obj.to_change_type(key, val)
             elif key in ['previously', 'fromname', 'was']:
                 previous_name = change_obj.to_str(key, val).strip()
@@ -940,7 +940,7 @@ class SchemaParser(object):
     def problem(self, message, level: SchemaObjectType,
                 source_line: int or None=None, source_col: int or None=None):
         problem = ErrorObject(
-            self.__current_source, message, self.__current_source,
+            None, message, self.__current_source,
             source_line=source_line, source_col=source_col, level=level)
         self.__problems.append(problem)
         return problem

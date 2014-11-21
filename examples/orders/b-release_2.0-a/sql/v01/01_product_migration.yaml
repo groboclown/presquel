@@ -1,6 +1,6 @@
 
 change:
-    type: sql
+    update: data
     sql: "
     INSERT INTO PRODUCT
         (Product_Sku)

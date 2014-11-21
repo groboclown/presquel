@@ -123,3 +123,11 @@ class SqlChange(Change):
         :return: SqlSet
         """
         return self.__sql_set
+
+    def __repr__(self):
+        return (
+            "SqlChange(order={}, comment={}, object_type={}, " +
+            "sql_set={}, affects={})".format(
+                self.order, self.comment, self.object_type, self.sql_set,
+                self.affects)
+        )

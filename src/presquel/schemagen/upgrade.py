@@ -19,6 +19,8 @@ class UpgradeAnalysisProblem(object):
     def __init__(self, obj: object, message: str):
         self.__obj = obj
         self.__message = message
+        if message is None or len(message.strip() <= 0):
+            raise Exception("invalid message")
 
     @property
     def obj(self) -> object:
@@ -189,11 +191,11 @@ class UpgradeAnalysis(object):
         return tuple(self._incompatible)
 
     @property
-    def constraint_changes(self) -> tuple:
+    def constraint_changes(self) -> object:
         """
         Change set for all the constraints.
 
-        :rtype: tuple[Constraint]
+        :rtype: SchemaUpgradedSet
         """
         return self.__constraint_changes
 
@@ -202,7 +204,7 @@ class UpgradeAnalysis(object):
         Does this upgrade have any changes?
         """
         return (
-            len(self.__constraint_changes) > 0 or
+            self.__constraint_changes.has_changes() > 0 or
             len(self.__changes) > 0
         )
 
@@ -295,7 +297,20 @@ class SchemaUpgradedSet(object):
             self.__warnings.append(UpgradeAnalysisProblem(
                 before, 'no explicit removal for ' + before.name))
 
-        self.__upgrades = tuple(upgrades)
+        final_upgrades = []
+        for upgrade in upgrades:
+            if upgrade is not None:
+                if isinstance(upgrade, UpgradeAnalysis):
+                    self.__errors.extend(upgrade.errors)
+                    self.__warnings.extend(upgrade.warnings)
+                final_upgrades.append(upgrade)
+            # else ignore it
+        self.__upgrades = tuple(final_upgrades)
+
+        for change in stand_alone_changes:
+            if isinstance(change, UpgradeAnalysis):
+                self.__errors.extend(change.errors)
+                self.__warnings.extend(change.warnings)
         self.__stand_alone_changes = tuple(stand_alone_changes)
 
     @property
@@ -351,9 +366,9 @@ class SchemaUpgradedSet(object):
 
         :rtype: list[UpgradeAnalysis or Change]
         """
-        ret = [self.__stand_alone_changes]
+        ret = list(self.__stand_alone_changes)
         ret.extend(self.__upgrades)
-        ret.sort(key='order')
+        ret.sort(key=lambda x: x.order)
         return ret
 
     @staticmethod
@@ -401,15 +416,16 @@ class BranchUpgradeAnalysis(object):
         self.__problems = []
 
         self.__schema_version = branch.schema_version
-        self.__parent_branch = self.__schema_version.parent
+        assert isinstance(self.__schema_version, SchemaVersion)
+        self.__parent_branch = branch.parent
         self.__parent_version = None
         self.__upgrade_set = None
         if self.__parent_branch is not None:
             self.__parent_version = self.__parent_branch.schema_version
-            all_new_values = [self.__schema_version.top_changes]
+            all_new_values = list(self.__schema_version.top_changes)
             all_new_values.extend(self.__schema_version.schema)
             self.__upgrade_set = SchemaUpgradedSet(
-                self.__parent_version, all_new_values)
+                self.__parent_version.schema, all_new_values)
 
             # FIXME need a way to determine if there are no changes.
 
@@ -484,6 +500,7 @@ class ColumnarUpgradeAnalysis(UpgradeAnalysis):
                     after_set.append(change)
             column_upgrades = SchemaUpgradedSet(before.columns, after_set)
             self._errors.extend(column_upgrades.errors)
+            self._warnings.extend(column_upgrades.warnings)
             self._check_column_problems(column_upgrades)
 
         self.__column_upgrades = column_upgrades

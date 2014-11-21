@@ -11,12 +11,26 @@ VERSION = "%{prog}s " + presquel.VERSION_STR
 
 def find_max_order_len(max_len, schema_list):
     for sch in schema_list:
-        if not isinstance(sch, presquel.model.SchemaObject):
-            raise Exception("expected SchemaObject, found " + repr(sch)) 
-        ord_len = len(str(sch.order.items()[0]))
-        if ord_len > max_len:
-            max_len = ord_len
-        max_len = find_max_order_len(max_len, sch.sub_schema)
+        if isinstance(sch, presquel.schemagen.UpgradeAnalysis):
+            ord_len = len(str(sch.order.items()[0]))
+            if ord_len > max_len:
+                max_len = ord_len
+            for change_list in sch.change_categories.values():
+                max_len = find_max_order_len(max_len, change_list)
+            max_len = find_max_order_len(
+                max_len, sch.constraint_changes.all_upgrades)
+
+        elif isinstance(sch, presquel.model.Change):
+            ord_len = len(str(sch.order.items()[0]))
+            if ord_len > max_len:
+                max_len = ord_len
+        elif isinstance(sch, presquel.model.SchemaObject):
+            ord_len = len(str(sch.order.items()[0]))
+            if ord_len > max_len:
+                max_len = ord_len
+            max_len = find_max_order_len(max_len, sch.sub_schema)
+        else:
+            raise Exception("expected SchemaObject, found " + repr(sch))
     return max_len
 
 
@@ -84,8 +98,19 @@ class SourceSetup(object):
             if self.analysis.previous_version is not None:
                 self.problems.extend([
                     "({}) {}".format(
-                        self.analysis.previous_version.version, str(prb))
+                        self.analysis.previous_version.version, prb)
                     for prb in self.analysis.previous_version.problems])
+            if self.analysis.upgrade_set is not None:
+                self.problems.extend([
+                    "({}) {}".format(
+                        self.analysis.current_version.version, prb)
+                    for prb in self.analysis.upgrade_set.errors])
+
+                # FIXME Make warnings optionally errors
+                self.problems.extend([
+                    "({}) {}".format(
+                        self.analysis.current_version.version, prb)
+                    for prb in self.analysis.upgrade_set.warnings])
 
     def set_output(self, output_dir: str, directories: bool, force: bool):
         if directories:
@@ -166,7 +191,8 @@ if __name__ == '__main__':
     for setup in sources:
         assert isinstance(setup, SourceSetup)
         os.makedirs(setup.out_dir)
-        changes = setup.analysis.changes()
+        assert isinstance(setup.analysis, presquel.BranchUpgradeAnalysis)
+        changes = setup.analysis.changes
         order_length = find_max_order_len(-1, changes)
         name_format = ('{0:0' + str(order_length) + 'd}_{1}.sql')
 

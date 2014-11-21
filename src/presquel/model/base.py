@@ -307,5 +307,5 @@ DATA_TYPE = SchemaObjectType('data')
 PROCEDURE_TYPE = SchemaObjectType('procedure')
 SCHEMA_OBJECT_TYPES = (COLUMN_TYPE, CONSTRAINT_TYPE, LOOKUP_TABLE_TYPE,
                        PRIMARY_KEY_TYPE, SEQUENCE_TYPE, INDEX_TYPE, TABLE_TYPE,
-                       VIEW_TYPE)
+                       VIEW_TYPE, DATA_TYPE, PROCEDURE_TYPE)
 

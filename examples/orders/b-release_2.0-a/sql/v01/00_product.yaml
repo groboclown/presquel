@@ -3,7 +3,7 @@ table:
   name: PRODUCT
   changes:
   - change:
-      type: create
+      type: add
   columns:
   - column:
       name: Product_Sku
