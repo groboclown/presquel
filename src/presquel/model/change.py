@@ -42,7 +42,8 @@ class Change(BaseObject):
     Non-trivial changes require a sql change.  Trivial changes use the
     SchemaChange object.
     """
-    def __init__(self, order, comment, object_type, change_type, affects):
+    def __init__(self, order, comment, object_type, change_type, affects,
+                 depends):
         BaseObject.__init__(self, order, comment, object_type)
         assert isinstance(change_type, ChangeType)
         self.__change_type = change_type
@@ -52,6 +53,9 @@ class Change(BaseObject):
         for obj in affects:
             assert isinstance(obj, str)
         self.__affects = tuple(affects)
+        for obj in depends:
+            assert isinstance(obj, str)
+        self.__depends = tuple(depends)
 
     @property
     def change_type(self):
@@ -66,9 +70,19 @@ class Change(BaseObject):
         """
         A list of the SQL objects that this change impacts.  If the change is
         associated with another Schema object, then it will not necessarily be
-        included in this list.
+        included in this list.  This is similar to the depends property, but
+        indicates that other changes that depend on the affects will come
+        after this change.
         """
         return self.__affects
+
+    @property
+    def depends(self):
+        """
+        List of sql objects that this change requires to exist.  Any other
+        creation or removal change will accordingly be ordered based on these
+        values.
+        """
 
 
 class SchemaChange(Change):
@@ -83,14 +97,17 @@ class SchemaChange(Change):
     For rename and remove changes, a `previous_name` must be given.
     """
     def __init__(self, order, comment, object_type, change_type, previous_name,
-            affects):
+                 affects, depends):
         affects = affects or []
+        depends = depends or []
         if isinstance(affects, str):
             affects = [affects]
+        if isinstance(depends, str):
+            depends = [depends]
         if previous_name is not None and previous_name not in affects:
             affects.append(previous_name)
         Change.__init__(self, order, comment, object_type, change_type,
-                        affects)
+                        affects, depends)
         self.__previous_name = previous_name
         if change_type in [REMOVE_CHANGE, RENAME_CHANGE]:
             assert previous_name is not None
@@ -111,8 +128,9 @@ class SqlChange(Change):
     """
     An explicit set of SQL instructions to run to perform the change.
     """
-    def __init__(self, order, comment, object_type, sql_set, affects):
-        Change.__init__(self, order, comment, object_type, SQL_CHANGE, affects)
+    def __init__(self, order, comment, object_type, sql_set, affects, depends):
+        Change.__init__(self, order, comment, object_type, SQL_CHANGE, affects,
+                        depends)
         assert isinstance(sql_set, SqlSet)
         self.__sql_set = sql_set
 

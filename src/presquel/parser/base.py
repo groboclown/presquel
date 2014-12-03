@@ -300,7 +300,7 @@ class SchemaParser(object):
         if source not in self.__source_order:
             self.__source_order[source] = [len(self.__source_order), [-1]]
         # make sure we have 1 more entry after the requested order.
-        while len(self.__source_order[source][1] <= order):
+        while len(self.__source_order[source][1]) <= order:
             self.__source_order[source][1].append(-1)
         self.__source_order[source][order] += 1
         ret = []
@@ -367,6 +367,7 @@ class SchemaParser(object):
         schema_type = None
         change_type = SQL_CHANGE
         affects = []
+        depends = []
 
         for (key, val) in top_change_dict.items():
             key = _strip_key(key)
@@ -386,6 +387,19 @@ class SchemaParser(object):
                     affects = []
                     for val2 in val:
                         affects.append(change_obj.to_str(key, val2.strip()))
+                else:
+                    change_obj.problem(
+                        key + ": expected list or string, found " + repr(val),
+                        ERROR_TYPE)
+            elif key == 'depends':
+                if isinstance(val, str):
+                    affects = []
+                    for val2 in val.split(','):
+                        depends.append(val2.strip())
+                elif isinstance(val, Iterable):
+                    affects = []
+                    for val2 in val:
+                        depends.append(change_obj.to_str(key, val2.strip()))
                 else:
                     change_obj.problem(
                         key + ": expected list or string, found " + repr(val),
@@ -420,7 +434,7 @@ class SchemaParser(object):
             return None
 
         ret = SqlChange(change_obj.order, change_obj.comment, schema_type,
-                        SqlSet(sql_set, None), affects)
+                        SqlSet(sql_set, None), affects, depends)
         change_obj.finish(ret)
         return ret
 
@@ -545,6 +559,7 @@ class SchemaParser(object):
         change_obj = BaseObjectBuilder(self)
         sql_set = []
         affects = []
+        depends = []
         change_type = SQL_CHANGE
         previous_name = None
 
@@ -568,6 +583,19 @@ class SchemaParser(object):
                     affects = []
                     for val2 in val.split(','):
                         affects.append(val2.strip())
+                else:
+                    change_obj.problem(
+                        key + ': must be a string or list, found ' + repr(val),
+                        ERROR_TYPE)
+            elif key == 'depends':
+                if isinstance(val, list) or isinstance(val, tuple):
+                    affects = []
+                    for val2 in val:
+                        depends.append(change_obj.to_str(key, val2).strip())
+                elif isinstance(val, str):
+                    affects = []
+                    for val2 in val.split(','):
+                        depends.append(val2.strip())
                 else:
                     change_obj.problem(
                         key + ': must be a string or list, found ' + repr(val),
@@ -599,11 +627,11 @@ class SchemaParser(object):
                     FATAL_TYPE)
                 return None
             return SqlChange(change_obj.order, change_obj.comment, schema_type,
-                             SqlSet(sql_set, None), affects)
+                             SqlSet(sql_set, None), affects, depends)
         else:
             return SchemaChange(change_obj.order, change_obj.comment,
                                 schema_type, change_type, previous_name,
-                                affects)
+                                affects, depends)
 
     def _parse_column(self, column_dict):
         """

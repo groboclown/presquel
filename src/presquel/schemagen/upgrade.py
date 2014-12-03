@@ -4,7 +4,7 @@ Inspects the schema between a previous and a current version.
 
 from ..model.base import (VIEW_TYPE, TABLE_TYPE, COLUMN_TYPE, Order)
 from ..model.schema import (
-    SchemaObject, Column, Table, View, Constraint, ColumnarSchemaObject)
+    SchemaObject, Column, Table, View, ColumnarSchemaObject)
 from ..model.change import (
     Change, SchemaChange, SqlChange, REMOVE_CHANGE,
     ADD_CHANGE, RENAME_CHANGE, ALTER_CHANGE, SQL_CHANGE, CHANGE_TYPES,
