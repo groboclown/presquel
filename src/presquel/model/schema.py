@@ -279,8 +279,8 @@ class Column(SchemaObject):
     A SQL column definition.
     """
     def __init__(self, order, comment, name, value_type, data_type, value,
-                 default_value, auto_increment, remarks, before_column,
-                 after_column, position, constraints, changes):
+                 default_value, auto_increment, remarks, position, constraints,
+                 changes):
         assert value_type is not None
         assert data_type is not None
         assert value is None or isinstance(value, ValueTypeValue)
@@ -294,8 +294,6 @@ class Column(SchemaObject):
         self.__default_value = default_value
         self.__auto_increment = auto_increment
         self.__remarks = remarks
-        self.__before_column = before_column
-        self.__after_column = after_column
         self.__position = position
         self.__constraints = constraints
         self.__data_type = data_type
@@ -331,14 +329,6 @@ class Column(SchemaObject):
     @property
     def remarks(self):
         return self.__remarks
-
-    @property
-    def before_column(self):
-        return self.__before_column
-
-    @property
-    def after_column(self):
-        return self.__after_column
 
     @property
     def position(self):

@@ -55,7 +55,7 @@ class SourceSetup(object):
         if not os.path.isdir(self.base_dir):
             self.problems.append("not a directory: " + self.base_dir)
 
-        self.out_dir = None
+        self.out_dir = ""
         self.package = None
         self.branch = None
         self.analysis = None

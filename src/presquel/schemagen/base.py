@@ -9,6 +9,29 @@ from .upgrade import (
     UpgradeAnalysis, TableUpgradeAnalysis, ViewUpgradeAnalysis,
     SequenceUpgradeAnalysis, ProcedureUpgradeAnalysis
 )
+from .upgrade_change import (TopLevelUpgradeChanges, UpgradeChange)
+
+
+class UpgradeSchemaPlatformGenerator(object):
+    """
+    Base class for performing upgrades.
+    """
+    def generate_sql(self, top_object: TopLevelUpgradeChanges) -> list:
+        """
+        :rtype: list[str]
+        """
+        raise NotImplemented("abstract class")
+
+
+class NewSchemaPlatformGenerator(object):
+    """
+    Base class for creating a new schema.
+    """
+    def generate_sql(self, top_object: SchemaObject) -> list:
+        """
+        :rtype: list[str]
+        """
+        raise NotImplemented("abstract class")
 
 
 class SchemaScriptGenerator(object):
@@ -48,7 +71,8 @@ class SchemaScriptGenerator(object):
         else:
             raise Exception("Cannot generate schema with " + str(top_object))
 
-    def generate_upgrade(self, change: UpgradeAnalysis or SqlChange) -> list:
+    def generate_upgrade(
+            self, change: UpgradeChange) -> list:
         """
         :rtype: list[str]
         """
@@ -85,8 +109,12 @@ class SchemaScriptGenerator(object):
 
         :rtype: list[str]
         """
+
         if not change.has_changes():
             return []
+
+        # FIXME this should instead be taking a series of abstract changes,
+        # and converting those.
 
         if isinstance(change, TableUpgradeAnalysis):
             return self._generate_upgrade_table(change)
@@ -150,7 +178,7 @@ class SchemaScriptGenerator(object):
         else:
             return []
 
-    def _generate_upgrade_table(self, table: TableUpgradeAnalysis):
+    def _generate_upgrade_table(self, table: TableUpgradeAnalysis) -> list:
         """
         Generate the upgrade script for a Table.
 
@@ -163,15 +191,17 @@ class SchemaScriptGenerator(object):
         # then the remaining constraint changes.
 
         ret = []
-        for top_change in table.change_categories.values():
-            ret.extend(self._generate_upgrade_table_change(table, top_change))
+        for top_change_list in table.change_categories.values():
+            for top_change in top_change_list:
+                ret.extend(self._generate_upgrade_table_change(
+                    table, top_change))
 
         for constraint in table.constraints:
             for change in constraint.changes:
                 ret.extend(self._generate_upgrade_table_constraint(table,
                            constraint, change))
 
-        raise NotImplementedError("not implemented")
+        return ret
 
     def _generate_upgrade_table_change(
             self, table: TableUpgradeAnalysis, change: Change):

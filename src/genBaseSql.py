@@ -71,8 +71,8 @@ class SourceSetup(object):
                 )
 
         if self.branch is not None:
-            self.problems.extend([str(branch)
-                                  for branch in self.branch.schema_version.problems])
+            self.problems.extend(
+                [str(branch) for branch in self.branch.schema_version.problems])
 
     def set_output(self, output_dir: str, directories: bool, force: bool):
         if directories:

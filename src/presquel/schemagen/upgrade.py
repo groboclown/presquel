@@ -19,7 +19,7 @@ class UpgradeAnalysisProblem(object):
     def __init__(self, obj: object, message: str):
         self.__obj = obj
         self.__message = message
-        if message is None or len(message.strip() <= 0):
+        if message is None or len(message.strip()) <= 0:
             raise Exception("invalid message")
 
     @property
@@ -597,6 +597,8 @@ class ProcedureUpgradeAnalysis(UpgradeAnalysis):
     def __init__(self, before: SchemaObject or None,
                  after: SchemaObject or Change or None):
         UpgradeAnalysis.__init__(self, before, after)
+
+        # This is generally just a drop and replace.
 
         raise NotImplementedError()
 

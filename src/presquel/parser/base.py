@@ -24,7 +24,9 @@ class BaseObjectBuilder(object):
         assert isinstance(parser, SchemaParser)
         object.__init__(self)
         self._parser = parser
-        self.order = parser.next_order()
+        self.order_list = parser.next_order_list()
+        self.before = []
+        self.after = []
         self.comment = None
         self.__problems = []
 
@@ -38,7 +40,11 @@ class BaseObjectBuilder(object):
         elif key == 'comment':
             self.comment = self.to_str(key, val).strip()
         elif key == 'order':
-            self.order = self._parser.next_explicit_order(int(val))
+            self.order_list = self._parser.next_explicit_order_list(int(val))
+        elif key in ['before', 'depends']:
+            self.before = self.to_str_list(key, val)
+        elif key in ['after', 'usedby']:
+            self.after = self.to_str_list(key, val)
         else:
             return False
         return True
@@ -47,6 +53,9 @@ class BaseObjectBuilder(object):
         for problem in self.__problems:
             problem.set_source(obj)
         return obj
+
+    def mk_order(self):
+        return Order(self.order_list, self.before, self.after)
 
     def to_str(self, key, val):
         if isinstance(val, str):
@@ -58,6 +67,18 @@ class BaseObjectBuilder(object):
                          # Should this be a warning?
                          ERROR_TYPE)
             return str(val)
+
+    def to_str_list(self, key, value):
+        # Lists should always be lists; let the language parser do it for us.
+        # But, we're nice.
+        if isinstance(value, str):
+            return [val.strip() for val in value.split(',')]
+        elif isinstance(value, Iterable):
+            return [self.to_str(key, val).strip() for val in value]
+        else:
+            self.problem(
+                key + ": expected list or string, found " + repr(value),
+                ERROR_TYPE)
 
     def to_int(self, key, val):
         if isinstance(val, int):
@@ -181,14 +202,7 @@ class SqlStatementBuilder(object):
         self.sql = None
 
     def set_platforms(self, key, platforms):
-        if isinstance(platforms, str):
-            self.platforms.extend([
-                pla.strip() for pla in platforms.split(',')
-            ])
-        else:
-            self.platforms.extend([
-                self.__parent.to_str(key, pla).strip() for pla in platforms
-            ])
+        self.platforms.extend(self.__parent.to_str_list(key, platforms))
 
     def make(self, src_dict):
         """
@@ -272,9 +286,11 @@ class SchemaParser(object):
     def source(self) -> str:
         return self.__current_source
 
-    def next_order(self, source=None):
+    def next_order_list(self, source=None) -> list:
         """
         Add the next item's implicit loading order.
+
+        :rtype: list[int]
         """
         if source is None:
             source = self.__current_source
@@ -287,11 +303,13 @@ class SchemaParser(object):
             len(self.__source_order[source][1]) - 1,
             self.__source_order[source][1][-1]
         ]
-        return Order(ret)
+        return ret
 
-    def next_explicit_order(self, order, source=None):
+    def next_explicit_order_list(self, order, source=None) -> list:
         """
         Define the next item's loading order explicitly.
+
+        :rtype: list[int]
         """
         assert isinstance(order, int)
         if source is None:
@@ -366,8 +384,6 @@ class SchemaParser(object):
         sql_set = []
         schema_type = None
         change_type = SQL_CHANGE
-        affects = []
-        depends = []
 
         for (key, val) in top_change_dict.items():
             key = _strip_key(key)
@@ -378,32 +394,6 @@ class SchemaParser(object):
                 schema_type = change_obj.to_schema_type(key, val)
             elif key in ['changetype', 'type']:
                 change_type = change_obj.to_change_type(key, val)
-            elif key == 'affects':
-                if isinstance(val, str):
-                    affects = []
-                    for val2 in val.split(','):
-                        affects.append(val2.strip())
-                elif isinstance(val, Iterable):
-                    affects = []
-                    for val2 in val:
-                        affects.append(change_obj.to_str(key, val2.strip()))
-                else:
-                    change_obj.problem(
-                        key + ": expected list or string, found " + repr(val),
-                        ERROR_TYPE)
-            elif key == 'depends':
-                if isinstance(val, str):
-                    affects = []
-                    for val2 in val.split(','):
-                        depends.append(val2.strip())
-                elif isinstance(val, Iterable):
-                    affects = []
-                    for val2 in val:
-                        depends.append(change_obj.to_str(key, val2.strip()))
-                else:
-                    change_obj.problem(
-                        key + ": expected list or string, found " + repr(val),
-                        ERROR_TYPE)
             elif key == 'dialects':
                 for chv in self.fetch_dicts_from_list(
                         key, val, ['dialect']):
@@ -433,8 +423,8 @@ class SchemaParser(object):
             self.problem("did not specify schema type for change", FATAL_TYPE)
             return None
 
-        ret = SqlChange(change_obj.order, change_obj.comment, schema_type,
-                        SqlSet(sql_set, None), affects, depends)
+        ret = SqlChange(change_obj.mk_order(), change_obj.comment, schema_type,
+                        SqlSet(sql_set, None))
         change_obj.finish(ret)
         return ret
 
@@ -473,7 +463,7 @@ class SchemaParser(object):
             table_obj.problem("must set a table name", FATAL_TYPE)
             return None
         return table_obj.finish(Table(
-            table_obj.order, table_obj.comment, table_obj.catalog_name,
+            table_obj.mk_order(), table_obj.comment, table_obj.catalog_name,
             table_obj.schema_name, table_obj.name, table_obj.table_space,
             columns, table_obj.constraints, table_obj.changes, wheres,
             extended))
@@ -533,7 +523,7 @@ class SchemaParser(object):
             view_obj.problem("no sql specified for view definition", FATAL_TYPE)
             return None
         return view_obj.finish(View(
-            view_obj.order, view_obj.comment, view_obj.catalog_name,
+            view_obj.mk_order(), view_obj.comment, view_obj.catalog_name,
             replace_if_exists, view_obj.schema_name, view_obj.name,
             SqlSet(sql_set, None), columns, view_obj.constraints,
             view_obj.changes, wheres, extended))
@@ -558,8 +548,6 @@ class SchemaParser(object):
 
         change_obj = BaseObjectBuilder(self)
         sql_set = []
-        affects = []
-        depends = []
         change_type = SQL_CHANGE
         previous_name = None
 
@@ -574,32 +562,6 @@ class SchemaParser(object):
                 change_type = change_obj.to_change_type(key, val)
             elif key in ['previously', 'fromname', 'was']:
                 previous_name = change_obj.to_str(key, val).strip()
-            elif key == 'affects':
-                if isinstance(val, list) or isinstance(val, tuple):
-                    affects = []
-                    for val2 in val:
-                        affects.append(change_obj.to_str(key, val2).strip())
-                elif isinstance(val, str):
-                    affects = []
-                    for val2 in val.split(','):
-                        affects.append(val2.strip())
-                else:
-                    change_obj.problem(
-                        key + ': must be a string or list, found ' + repr(val),
-                        ERROR_TYPE)
-            elif key == 'depends':
-                if isinstance(val, list) or isinstance(val, tuple):
-                    affects = []
-                    for val2 in val:
-                        depends.append(change_obj.to_str(key, val2).strip())
-                elif isinstance(val, str):
-                    affects = []
-                    for val2 in val.split(','):
-                        depends.append(val2.strip())
-                else:
-                    change_obj.problem(
-                        key + ': must be a string or list, found ' + repr(val),
-                        ERROR_TYPE)
             elif key == 'dialects':
                 for chv in self.fetch_dicts_from_list(
                         key, val, ['dialect']):
@@ -626,12 +588,11 @@ class SchemaParser(object):
                     "requires 'sql' or 'dialects' key for sql change",
                     FATAL_TYPE)
                 return None
-            return SqlChange(change_obj.order, change_obj.comment, schema_type,
-                             SqlSet(sql_set, None), affects, depends)
+            return SqlChange(change_obj.mk_order(), change_obj.comment,
+                             schema_type, SqlSet(sql_set, None))
         else:
-            return SchemaChange(change_obj.order, change_obj.comment,
-                                schema_type, change_type, previous_name,
-                                affects, depends)
+            return SchemaChange(change_obj.mk_order(), change_obj.comment,
+                                schema_type, change_type, previous_name)
 
     def _parse_column(self, column_dict):
         """
@@ -647,8 +608,6 @@ class SchemaParser(object):
         default_value = None
         auto_increment = False
         remarks = None
-        before_column = None
-        after_column = None
         position = None
         constraints = []
         changes = []
@@ -675,10 +634,6 @@ class SchemaParser(object):
                 default_value = self._parse_value_type_value(val, column_obj)
             elif key == 'remarks':
                 remarks = column_obj.to_str(key, val)
-            elif key == 'before' or key == 'beforecolumn':
-                before_column = column_obj.to_str(key, val).strip()
-            elif key == 'after' or key == 'aftercolumn':
-                after_column = column_obj.to_str(key, val).strip()
             elif key == 'autoincrement':
                 auto_increment = column_obj.to_boolean(key, val)
             elif key == 'position':
@@ -702,10 +657,9 @@ class SchemaParser(object):
             column_obj.problem("data type set to empty value", FATAL_TYPE)
             return None
         return column_obj.finish(Column(
-            column_obj.order, column_obj.comment, name, value_type,
+            column_obj.mk_order(), column_obj.comment, name, value_type,
             data_type, value, default_value, auto_increment, remarks,
-            before_column, after_column, position, constraints,
-            changes))
+            position, constraints, changes))
 
     def _parse_where(self, where_dict: dict, parent: BaseObjectBuilder):
         """
@@ -945,7 +899,7 @@ class SchemaParser(object):
                 return None
             if name is not None:
                 details['name'] = name
-            return SqlConstraint(cons_obj.order, cons_obj.comment,
+            return SqlConstraint(cons_obj.mk_order(), cons_obj.comment,
                                  constraint_type, column_names, details,
                                  SqlSet(sql_sets, arguments), changes)
 
@@ -953,17 +907,17 @@ class SchemaParser(object):
             if name is not None:
                 details['name'] = name
             code_set = LanguageSet({language: code}, arguments)
-            return LanguageConstraint(cons_obj.order, cons_obj.comment,
+            return LanguageConstraint(cons_obj.mk_order(), cons_obj.comment,
                                       constraint_type, column_names, details,
                                       code_set, changes)
 
         if name is not None:
-            return NamedConstraint(cons_obj.order, cons_obj.comment,
+            return NamedConstraint(cons_obj.mk_order(), cons_obj.comment,
                                    constraint_type, column_names, details, name,
                                    changes)
 
-        return Constraint(cons_obj.order, cons_obj.comment, constraint_type,
-                          column_names, details, changes)
+        return Constraint(cons_obj.mk_order(), cons_obj.comment,
+                          constraint_type, column_names, details, changes)
 
     def problem(self, message, level: SchemaObjectType,
                 source_line: int or None=None, source_col: int or None=None):

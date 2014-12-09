@@ -414,22 +414,24 @@ def _generate_validation_triggers(table, csts):
         for col in table.columns:
             sval = sval.replace('{' + col.name + '}', 'NEW.' + col.name)
 
-        checks += ('    IF NOT (' + sval +
-                ') THEN\n' +
-                "        CALL ErrorMsg ('" + msg + "');\n"
-                '    END IF;\n')
+        checks += (
+            '    IF NOT (' + sval +
+            ') THEN\n' +
+            "        CALL ErrorMsg ('" + msg + "');\n"
+            '    END IF;\n')
 
-    sql = ('delimiter //\n' +
-         'CREATE TRIGGER insert_validation_' + table.name +
-         '\n        BEFORE INSERT ON ' + table.name +
-         '\n        FOR EACH ROW' +
-         '\nBEGIN\n' + checks +
-         'END; //\n' +
-         'CREATE TRIGGER update_validation_' + table.name +
-         '\n        BEFORE UPDATE ON ' + table.name +
-         '\n        FOR EACH ROW' +
-         '\nBEGIN\n' + checks +
-         'END; //' +
-         '\ndelimiter ;')
+    sql = (
+        'delimiter //\n' +
+        'CREATE TRIGGER insert_validation_' + table.name +
+        '\n        BEFORE INSERT ON ' + table.name +
+        '\n        FOR EACH ROW' +
+        '\nBEGIN\n' + checks +
+        'END; //\n' +
+        'CREATE TRIGGER update_validation_' + table.name +
+        '\n        BEFORE UPDATE ON ' + table.name +
+        '\n        FOR EACH ROW' +
+        '\nBEGIN\n' + checks +
+        'END; //' +
+        '\ndelimiter ;')
 
     return sql

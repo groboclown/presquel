@@ -22,7 +22,7 @@ class ErrorObject(BaseObject):
                  source_name: str, source_pos: str or None=None,
                  source_line: int or None=None, source_col: int or None=None,
                  level: SchemaObjectType=ERROR_TYPE):
-        order = Order([0, 0, 0])
+        order = Order([0, 0, 0], [], [])
         if source is not None:
             order = source.order
         BaseObject.__init__(self, order, comment, level)
@@ -226,11 +226,11 @@ class SchemaVersion(object):
         assert isinstance(schema, list) or isinstance(schema, tuple)
         for sch in schema:
             assert isinstance(sch, SchemaObject)
-        self.__schema = sorted(schema)
+        self.__schema = BaseObject.full_sort(schema)
 
         for chg in top_changes:
             assert isinstance(chg, Change)
-        self.__top_changes = sorted(top_changes)
+        self.__top_changes = BaseObject.full_sort(top_changes)
 
         self.__problems = tuple(errors)
 
@@ -267,13 +267,12 @@ class SchemaVersion(object):
 
         :rtype: list[SchemaObject or Change]
         """
-        ret = [self.top_changes]
+        ret = list(self.top_changes)
         for obj in self.schema:
             assert isinstance(obj, SchemaObject)
             if obj.has_any_changes():
                 ret.append(obj)
-        ret.sort()
-        return ret
+        return BaseObject.full_sort(ret)
 
     # FIXME remove these once the corresponding checking code is removed
     def __lt__(self, version):
