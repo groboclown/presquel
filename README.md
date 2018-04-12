@@ -59,6 +59,8 @@ to migrate old versions to the current.  It makes for a bit of duplication
 in the files (it has both the current schema and the changes to get to the
 current schema), but tools are provided to make this process easier to manage.
 
+The change operations are only necessary when the schema upgrade is non-trivial.
+For example, if a data migration is necessary.
 
 ## Code Generation
 
@@ -104,6 +106,7 @@ are stored, but the other parts are important - the `v000` is how the tools
 discover the version order of the schema, and the `00` allows for sorting the
 files by name to order how they are processed.
 
+```(yaml)
     table:
         tableName: PRODUCT
         columns:
@@ -148,6 +151,7 @@ files by name to order how they are processed.
             - constraint:
                 type: unique index
                 columns: Manufacturer, Name
+```
 
 This defines a basic product definition table, with an auto-generated
 primary key column `Product_Id`.  We also require that the to columns
@@ -158,6 +162,7 @@ for querying on these two columns together.
 Then we define the `PRICE_LIST` table in the file
 `schema/v000/10_price_list.yaml`.
 
+```(yaml)
     table:
         tableName: PRICE_LIST
         columns:
@@ -219,6 +224,7 @@ Then we define the `PRICE_LIST` table in the file
                 OR (TIMESTAMPDIFF(SECOND, {Starts_On}, Starts_On) <= 0
                   AND TIMESTAMPDIFF(SECOND, {Ends_On}, Ends_On) >= 0)
                 ) <= 0"
+```
 
 This defines the `PRICE_LIST` table, which associates a product (here,
 a foreign key into the `PRODUCT` table) with a price.  It can contain multiple
@@ -236,7 +242,7 @@ copies the directory `schema/v000` into `schema/v001`.
 
 ### Adding Purchase Orders
 
-
+(TODO ADD)
 
 ### Release Candidate Bug Fix
 
@@ -251,6 +257,7 @@ introduce a Dewey Decimal numbering system for a minor patch by running the
 `migrateNextVersion.py` on `schema/v000` into `schema/v000.001`, and change
 the file `schema/v000.001/10_price_list.yaml` to have this column definition:
 
+```(yaml)
     - column:
         name: Price
         type: currency
@@ -259,23 +266,28 @@ the file `schema/v000.001/10_price_list.yaml` to have this column definition:
                 type: not null
             - change:
                 type: value type
+```
 
 By adding a Dewey Decimal numbering, the tools no longer have a reference
 of what to use for the parent version of `v001`.  A manifest file needs to be
 introduced to tell the tool more information.  The developers add the file
 `schema/v001/_manifest.yaml`:
 
+```(yaml)
     manifest:
         parent: v000.001
+```
 
 Then update the file `schema/v001/10_price_list.yaml` to have the column as:
 
+```(yaml)
     - column:
         name: Price
         type: currency
         constraints:
             - constraint:
                 type: not null
+```
 
 No change section is necessary, because the parent version includes the change.
 
