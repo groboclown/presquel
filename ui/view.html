@@ -28,27 +28,32 @@ function importfile(graph, filename) {
         var edges = [];
         var everything = [];
         var count = 0;
-        
+
         $(dom).find('table').each(function() {
             var el;
             var $cel = $(this);
             console.log("cell " + $cel.attr("id"));
             var column_names = [];
+            var width = $cel.attr("name").length
             $cel.find('column').each(function() {
                 var $col = $(this);
                 var name = $col.attr("name");
                 // map the column id to the table id
                 columns[String($col.attr("id"))] = String($cel.attr("id"));
                 column_names.push($col.attr("name"));
+                width = Math.max($col.attr("name").length, width)
             });
             el = new joint.shapes.basic.Rect({
                 position: { x: ((count % 10) * 60), y: ((count / 10) * 100) },
-                size: { width: 60, height: 100 },
+                size: { width: '' + (width + 2) + 'em', height: '' + (column_names.length + 2) + 'em' },
                 attrs: {
                     rect: {
                         fill: 'blue'
                     },
                     text: {
+                        // TODO move the table name and column names into
+                        // different child boxes, so that they can have
+                        // separate colors.
                         text: $cel.attr("name") + '\n' + column_names.join('\n'),
                         fill: 'white'
                     }
@@ -91,20 +96,20 @@ $(document).ready(function () {
         model: graph,
         gridSize: 10
     });
-    
-    
-    
+
+
+
     graph.on('change:position', function(cell) {
         if (!! cell.type && cell.type !== 'schema.Table') {
             // don't allow edges and columns to be moved
             cell.set('position', cell.previous('position'));
         }
     });
-    
-    
+
+
     // Hard-coded name.  see genGraphXml.py
     importfile(graph, 'schema.graph.xml');
-    
+
     // layout the boxes
     //joint.layout.DirectedGraph.layout(graph, { setLinkVerticies: false });
 });

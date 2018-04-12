@@ -1,5 +1,4 @@
-presquel
-========
+# presquel
 
 This tool allows for automation around version controlled changes to a database
 schema, as well as controlling the software API interaction with the database.

@@ -24,7 +24,7 @@ import math
 from yaml import load as load_yaml
 
 
-def load_package(root_dir, package: str or None) -> SchemaPackage:
+def load_package(root_dir, package: str or None=None) -> SchemaPackage:
     """
     Finds and parses all the schema versions in the given directory.  The
     returned list of schemas will be sorted, with the most recent version
@@ -36,6 +36,8 @@ def load_package(root_dir, package: str or None) -> SchemaPackage:
 
     if package is None:
         package = os.path.basename(root_dir)
+        if len(package) <= 0:
+            package = os.path.basename(os.path.dirname(root_dir))
 
     all_metadata = {}
 
@@ -95,7 +97,9 @@ class VersionMetadata(object):
         :type problems: tuple[ErrorObject] or list[ErrorObject]
         """
         object.__init__(self)
+        assert isinstance(base_dir, str) and len(base_dir) > 0
         self.__basedir = base_dir
+        assert isinstance(package, str) and len(package) > 0
         self.__package = package
 
         assert isinstance(version, SchemaVersionNumber)
@@ -119,6 +123,8 @@ class VersionMetadata(object):
 
         :rtype: tuple[VersionMetadata]
         """
+        assert isinstance(base_dir, str) and len(base_dir) > 0
+        assert isinstance(package, str) and len(package) > 0
         name = os.path.basename(base_dir)
         manifest_file = os.path.join(MANIFEST_FILE_NAME)
         problems = []
